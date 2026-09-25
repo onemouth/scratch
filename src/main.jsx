@@ -16,7 +16,9 @@ async function api(path, method = 'GET', body) {
   return result;
 }
 
-function PtyTerminal({ id, stopped }) {
+function PtyTerminal({ id, stopped, focusRequest }) {
+  const [ready, setReady] = useState(false);
+  const focusedRequest = React.useRef(0);
   const container = React.useRef(null);
   const termRef = React.useRef(null);
   useEffect(() => {
@@ -47,13 +49,32 @@ function PtyTerminal({ id, stopped }) {
     element.addEventListener('paste', onPaste, true);
     const connect = () => {
       socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal/${id}`);
-      socket.onopen = () => { terminal.reset(); resize(); };
+      socket.onopen = () => { terminal.reset(); resize(); if (alive) setReady(true); };
       socket.onmessage = event => terminal.write(event.data);
-      socket.onclose = () => { if (alive) retry = setTimeout(connect, 1500); };
+      socket.onclose = () => { if (alive) { setReady(false); retry = setTimeout(connect, 1500); } };
     };
     connect();
     return () => { alive = false; clearTimeout(retry); socket?.close(); element.removeEventListener('paste', onPaste, true); observer.disconnect(); input.dispose(); terminal.dispose(); termRef.current = null; };
   }, [id]);
+  useEffect(() => {
+    if (!ready || stopped || !focusRequest || focusedRequest.current === focusRequest) return;
+    let frame;
+    let attempts = 0;
+    const focus = () => {
+      // React Flow initially hides unmeasured nodes; focusing their textarea
+      // before layout succeeds silently but leaves keyboard focus on the page.
+      if (container.current && getComputedStyle(container.current).visibility !== 'hidden') {
+        termRef.current?.focus();
+        if (document.activeElement === termRef.current?.textarea) {
+          focusedRequest.current = focusRequest;
+          return;
+        }
+      }
+      if (++attempts < 120) frame = requestAnimationFrame(focus);
+    };
+    frame = requestAnimationFrame(focus);
+    return () => cancelAnimationFrame(frame);
+  }, [ready, stopped, focusRequest]);
   useEffect(() => { if (stopped) termRef.current?.blur(); }, [stopped]);
   return <div className="terminal nodrag nowheel" ref={container} onMouseDown={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()} />;
 }
@@ -71,12 +92,12 @@ function AgentNode({ id, data, selected }) {
     <header className="node-header">
       <span className="status-dot" /><strong title={agent.name}>{agent.name}</strong><span className="badge">{agent.status}</span>
       {agent.status === 'running' && <button className="icon-btn nodrag" title="Stop agent" aria-label={`Stop ${agent.name}`} onClick={stop}>■</button>}
-      {agent.status === 'stopped' && <button className="icon-btn nodrag" title="Reopen conversation (no task sent)" aria-label={`Resume ${agent.name}`} onClick={() => api(`/agents/${id}/resume`, 'POST').catch(e => setError(e.message))}>▶</button>}
+      {agent.status === 'stopped' && <button className="icon-btn nodrag" title="Reopen conversation (no task sent)" aria-label={`Resume ${agent.name}`} onClick={() => api(`/agents/${id}/resume`, 'POST').then(() => data.onFocus(id)).catch(e => setError(e.message))}>▶</button>}
       {agent.status === 'stopped' && <button className="icon-btn nodrag" title="Remove node from canvas" aria-label={`Remove ${agent.name} from canvas`} onClick={remove}>×</button>}
     </header>
     <div className="node-subtitle" title={agent.workdir}>{agent.workdir}</div>
     {agent.note && <div className="node-note" title={agent.note}>{agent.note}</div>}
-    <PtyTerminal id={id} stopped={agent.status === 'stopped'} />
+    <PtyTerminal id={id} stopped={agent.status === 'stopped'} focusRequest={data.focusRequest} />
     {agent.restoreWarning && <div className="node-error">{agent.restoreWarning}</div>}
     {error && <div className="node-error">{error}</div>}
     <Handle type="source" position={Position.Right} />
@@ -152,7 +173,11 @@ function Canvas() {
   const [error, setError] = useState('');
   const [connected, setConnected] = useState(false);
   const [pointerMode, setPointerMode] = useState('mouse');
-  const { screenToFlowPosition } = useReactFlow();
+  const { screenToFlowPosition, setCenter } = useReactFlow();
+  const [focusTarget, setFocusTarget] = useState(null);
+  const focusSequence = React.useRef(0);
+  const centeredRequest = React.useRef(0);
+  const focusAgent = useCallback(id => setFocusTarget({ id, request: ++focusSequence.current }), []);
 
   useEffect(() => {
     if (!open) return;
@@ -178,11 +203,19 @@ function Canvas() {
   };
   useEffect(() => {
     const stream = new EventSource('/api/events');
-    stream.onopen = () => setConnected(true);
+    let knownAgents = null;
+    stream.onopen = () => { knownAgents = null; setConnected(true); };
     stream.onerror = () => setConnected(false);
-    stream.onmessage = (e) => setState(JSON.parse(e.data));
+    stream.onmessage = (e) => {
+      const next = JSON.parse(e.data);
+      const added = knownAgents && next.agents.filter(agent => !knownAgents.has(agent.id));
+      knownAgents = new Set(next.agents.map(agent => agent.id));
+      setState(next);
+      // Initial load/reconnect does not steal focus; live API-created agents do.
+      if (added?.length) focusAgent(added.at(-1).id);
+    };
     return () => stream.close();
-  }, []);
+  }, [focusAgent]);
   useEffect(() => {
     setNodes(previous => {
       const byId = new Map(previous.map(n => [n.id, n]));
@@ -190,14 +223,22 @@ function Canvas() {
         const old = byId.get(agent.id);
         return {
           id: agent.id, type: 'agent', position: old?.dragging ? old.position : { x: agent.x, y: agent.y },
-          style: { width: agent.width, height: agent.height }, data: { agent }, selected: old?.selected,
+          style: { width: agent.width, height: agent.height }, data: { agent, onFocus: focusAgent, focusRequest: !open && !docsOpen && focusTarget?.id === agent.id ? focusTarget.request : 0 }, selected: old?.selected,
         };
       }), ...(state.notes || []).map(note => {
         const old = byId.get(note.id);
         return { id: note.id, type: 'note', position: old?.dragging ? old.position : { x: note.x, y: note.y }, style: { width: note.width, height: note.height }, data: { note }, selected: old?.selected };
       })];
     });
-  }, [state.agents, state.notes]);
+  }, [state.agents, state.notes, focusTarget, open, docsOpen, focusAgent]);
+  useEffect(() => {
+    if (!focusTarget || open || docsOpen || centeredRequest.current === focusTarget.request) return;
+    const node = nodes.find(node => node.id === focusTarget.id);
+    if (!node) return;
+    centeredRequest.current = focusTarget.request;
+    setNodes(previous => previous.map(item => ({ ...item, selected: item.id === node.id })));
+    setCenter(node.position.x + node.style.width / 2, node.position.y + node.style.height / 2, { zoom: 1, duration: 200 });
+  }, [nodes, focusTarget, open, docsOpen, setCenter]);
   const onNodesChange = useCallback(changes => setNodes(ns => applyNodeChanges(changes, ns)), []);
   const onNodeDragStop = useCallback((_, node) => { api(`/${node.type === 'note' ? 'notes' : 'agents'}/${node.id}`, 'PATCH', { x: node.position.x, y: node.position.y }).catch(console.error); }, []);
   const onConnect = useCallback(async ({ source, target }) => { try { await api('/edges', 'POST', { source, target }); } catch (e) { setError(e.message); } }, []);
@@ -216,7 +257,8 @@ function Canvas() {
     e.preventDefault(); setError('');
     try {
       const position = screenToFlowPosition({ x: innerWidth / 2 - 210, y: innerHeight / 2 - 160 });
-      await api('/agents', 'POST', { ...form, x: position.x, y: position.y });
+      const agent = await api('/agents', 'POST', { ...form, x: position.x, y: position.y });
+      focusAgent(agent.id);
       setForm(f => ({ ...f, name: '' })); setOpen(false);
     } catch (err) { setError(err.message); }
   };
