@@ -18,12 +18,12 @@ npm start         # serves built app and API together on http://127.0.0.1:3001
 
 Vite proxies `/api` (including the terminal WebSocket) to the Node server in development. If you change the API port, update both `PORT` for the server and the proxy target in `vite.config.js`. Avoid running `npm start` and `npm run dev` simultaneously on port 3001.
 
-For a manual end-to-end check: create an Agent in the browser with an existing workdir; confirm its empty Pi TUI appears, type a simple task into the terminal, check resizing, the Guide's copied URL and that Stop leaves the node visible. Remove the stopped node and check that its edges disappear, then try **Resume · pi -r** in the same workdir and choose that saved Pi session. Sending a task invokes your configured model; the automated tests do not.
+For a manual end-to-end check: choose a saved Pi session folder from the workdir dropdown (or enter one manually), then create an Agent in the browser; confirm its empty Pi TUI appears, type a simple task into the terminal, check resizing, the Guide's copied URL and that Stop leaves the node visible. Remove the stopped node and check that its edges disappear, then try **Resume · pi -r** in the same workdir and choose that saved Pi session. Sending a task invokes your configured model; the automated tests do not.
 
 ## Source map
 
 - `server/index.js` — in-memory state, validation, Pi PTYs, HTTP/SSE/WebSocket, static production assets, served API guide.
-- `server/index.test.js` — API lifecycle, delegation, terminal I/O and guide URL tests using a fake PTY.
+- `server/index.test.js` — API lifecycle, saved-session workdirs, delegation, terminal I/O and guide URL tests using a fake PTY.
 - `src/main.jsx` — canvas and terminal browser UI.
 - `src/style.css` — canvas, nodes, terminal and guide styling.
 - `docs/agent-api.md` — single source for the copyable agent-facing API guide (the server substitutes `$AGENT_CANVAS_URL` when serving it).

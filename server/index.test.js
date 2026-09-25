@@ -1,6 +1,9 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
+import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
+import { join } from 'node:path';
+import { tmpdir } from 'node:os';
 import { WebSocket } from 'ws';
 import { createApp } from './index.js';
 
@@ -21,7 +24,13 @@ const nextMessage = (ws) => new Promise(resolve => ws.once('message', data => re
 
 test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
   fakeSpawn.children = [];
-  const app = createApp({ port: 0, spawnAgent: fakeSpawn });
+  const sessionsRoot = await mkdtemp(join(tmpdir(), 'agent-canvas-sessions-'));
+  await mkdir(join(sessionsRoot, 'project'));
+  for (const name of ['one.jsonl', 'two.jsonl']) {
+    await writeFile(join(sessionsRoot, 'project', name), JSON.stringify({ type: 'session', cwd: process.cwd() }) + '\n' + '{"type":"message","message":{"content":"not read"}}\n');
+  }
+  await writeFile(join(sessionsRoot, 'project', 'invalid.jsonl'), 'not json\n');
+  const app = createApp({ port: 0, spawnAgent: fakeSpawn, sessionsRoot });
   await app.listen();
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const request = async (path, method = 'GET', body) => {
@@ -41,6 +50,8 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.ok((await browserGuide.text()).includes('curl -fsS "http://127.0.0.1:5173/api/state"'));
     const spoofedGuide = await fetch(base + '/api/docs?origin=https%3A%2F%2Funtrusted.example');
     assert.ok((await spoofedGuide.text()).includes(`curl -fsS "${base}/api/state"`));
+    const { data: saved } = await request('/api/session-workdirs');
+    assert.deepEqual(saved.workdirs.map(({ path, sessionCount }) => ({ path, sessionCount })), [{ path: process.cwd(), sessionCount: 2 }]);
     assert.equal((await request('/api/agents', 'POST', { name: 'test', task: 'hi', workdir: '/definitely/missing' })).status, 400);
     const first = (await request('/api/agents', 'POST', { name: 'parent', task: 'hello', workdir: process.cwd() })).data;
     assert.equal(first.status, 'running');
@@ -85,5 +96,5 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.ok(!app.snapshot().agents.some(agent => agent.id === first.id));
     assert.equal(app.snapshot().edges.length, 0);
     assert.equal((await request(`/api/agents/${first.id}`, 'DELETE')).status, 404);
-  } finally { ws?.terminate(); await app.close(); }
+  } finally { ws?.terminate(); await app.close(); await rm(sessionsRoot, { recursive: true, force: true }); }
 });

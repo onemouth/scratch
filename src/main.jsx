@@ -50,7 +50,6 @@ function AgentNode({ id, data, selected }) {
   const [error, setError] = useState('');
   const stop = async () => { try { await api(`/agents/${id}/stop`, 'POST'); } catch (e) { setError(e.message); } };
   const remove = async () => {
-    if (!confirm(`Remove ${agent.name} from the canvas? Its saved Pi session will not be deleted.`)) return;
     try { await api(`/agents/${id}`, 'DELETE'); } catch (e) { setError(e.message); }
   };
   return <div className={`agent-node ${agent.status}`}>
@@ -76,6 +75,9 @@ function Canvas() {
   const [nodes, setNodes] = useState([]);
   const [form, setForm] = useState({ name: '', workdir: '', mode: 'new' });
   const [open, setOpen] = useState(false);
+  const [savedWorkdirs, setSavedWorkdirs] = useState([]);
+  const [workdirsLoading, setWorkdirsLoading] = useState(false);
+  const [workdirsError, setWorkdirsError] = useState('');
   const [docsOpen, setDocsOpen] = useState(false);
   const [guide, setGuide] = useState('');
   const [docsError, setDocsError] = useState('');
@@ -85,6 +87,15 @@ function Canvas() {
   const [pointerMode, setPointerMode] = useState('mouse');
   const { screenToFlowPosition } = useReactFlow();
 
+  useEffect(() => {
+    if (!open) return;
+    let active = true;
+    setWorkdirsLoading(true); setWorkdirsError('');
+    api('/session-workdirs').then(({ workdirs }) => { if (active) setSavedWorkdirs(workdirs); })
+      .catch(e => { if (active) setWorkdirsError(e.message); })
+      .finally(() => { if (active) setWorkdirsLoading(false); });
+    return () => { active = false; };
+  }, [open]);
   useEffect(() => {
     if (!docsOpen || guide) return;
     let active = true;
@@ -157,6 +168,11 @@ function Canvas() {
       </div>
       <label>Node name<input autoFocus required maxLength="100" placeholder="e.g. Researcher" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
       <label>Working directory<input required placeholder="/absolute/path/to/project" value={form.workdir} onChange={e => setForm({ ...form, workdir: e.target.value })} /></label>
+      <label>Saved Pi session folders<select value="" disabled={workdirsLoading || savedWorkdirs.length === 0} onChange={e => setForm(f => ({ ...f, workdir: e.target.value }))}>
+        <option value="">{workdirsLoading ? 'Loading saved folders…' : savedWorkdirs.length ? 'Choose a saved folder…' : 'No saved Pi session folders'}</option>
+        {savedWorkdirs.map(item => <option key={item.path} value={item.path}>{item.path} ({item.sessionCount} {item.sessionCount === 1 ? 'session' : 'sessions'})</option>)}
+      </select></label>
+      {workdirsError && <div className="node-error">Could not load saved folders: {workdirsError}. You can still enter a path manually.</div>}
       <p className="mode-help">{form.mode === 'new'
         ? 'Pi will open a new session. Type your first instruction directly in the terminal.'
         : 'Pi will open its session picker for this working directory inside the terminal. Choose a saved session there.'}</p>

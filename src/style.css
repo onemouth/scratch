@@ -62,8 +62,9 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .session-mode button.active { color: #11152b; background: #a5a7fa; font-weight: 700; }
 .mode-help { background: #202d40; border: 1px solid #3b4b64; border-radius: 7px; color: #b7c4d9; font-size: 12px; line-height: 1.6; padding: 12px; margin: 16px 0; }
 .modal label { display: block; margin: 15px 0; font-size: 12px; font-weight: 600; color: #b7c4d9; }
-.modal input, .modal textarea { display: block; margin-top: 7px; width: 100%; background: #121c2c; color: #ecf0f9; border: 1px solid #3b4b64; border-radius: 7px; outline: none; padding: 11px; font-size: 12px; resize: vertical; }
-.modal input:focus, .modal textarea:focus { border-color: #a5a7fa; }
+.modal input, .modal textarea, .modal select { display: block; margin-top: 7px; width: 100%; background: #121c2c; color: #ecf0f9; border: 1px solid #3b4b64; border-radius: 7px; outline: none; padding: 11px; font-size: 12px; resize: vertical; }
+.modal input:focus, .modal textarea:focus, .modal select:focus { border-color: #a5a7fa; }
+.modal select:disabled { color: #8392ad; }
 .guide-modal { width: min(780px, calc(100vw - 32px)); max-height: min(85vh, 900px); display: flex; flex-direction: column; }
 .guide-modal .modal-head { margin-bottom: 4px; flex: none; }
 .guide-intro { color: #aab9d0; font-size: 12px; line-height: 1.5; margin: 8px 0 15px; }

@@ -72,6 +72,7 @@ Notes are at most 500 characters and appear on the node. Only update **your own*
 
 ## Other interfaces and boundaries
 
+- `GET /api/session-workdirs` lists existing workdirs referenced by saved Pi session headers (used by the web UI's workdir dropdown; it does not read conversation content).
 - `GET /api/events` is a Server-Sent Events stream of canvas snapshots (used by the web UI).
 - `WS /api/terminal/:id` streams PTY output and accepts raw terminal input and resize messages (used by the web UI). Do not use it for agent-to-agent messaging.
 - `POST /api/agents/:id/stop` terminates a Pi process. `DELETE /api/agents/:id` removes a **stopped** node and its relationships from this canvas, but does not delete its saved Pi session. Don't stop or remove another agent unless explicitly asked.

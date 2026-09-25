@@ -11,7 +11,7 @@ npm install
 npm run dev
 ```
 
-Open **http://127.0.0.1:5173**. Choose an existing working directory by entering its absolute path, then either launch a **new Pi session** and type directly in its terminal, or select **Resume · pi -r** to pick an existing session inside the terminal. New Pi sessions are saved by Pi so they can be resumed later; Canvas nodes themselves are not restored after server restart. Click inside the terminal to interact with Pi; Stop ends its process but leaves the node and its output. A stopped node has a Remove button to delete it and its connections from this canvas (not Pi's saved session).
+Open **http://127.0.0.1:5173**. Enter an existing working directory's absolute path, or choose one from the saved Pi session folders dropdown, then either launch a **new Pi session** and type directly in its terminal, or select **Resume · pi -r** to pick an existing session inside the terminal. New Pi sessions are saved by Pi so they can be resumed later; Canvas nodes themselves are not restored after server restart. Click inside the terminal to interact with Pi; Stop ends its process but leaves the node and its output. A stopped node has a Remove button to delete it and its connections from this canvas (not Pi's saved session).
 
 Use the bottom-right toggle: **Mouse** uses right-drag to pan and the wheel to zoom; **Touchpad** uses two-finger scroll to pan and pinch to zoom. Drag nodes by their headers, resize selected nodes, and connect right-to-left handles to record delegation.
 

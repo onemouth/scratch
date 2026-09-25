@@ -3,7 +3,9 @@ import pty from 'node-pty';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
 import { existsSync, statSync, createReadStream, readFileSync } from 'node:fs';
-import { resolve, join, extname } from 'node:path';
+import { readdir, open, stat } from 'node:fs/promises';
+import { homedir } from 'node:os';
+import { resolve, join, extname, isAbsolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -12,7 +14,44 @@ const apiGuide = join(root, 'docs', 'agent-api.md');
 const MAX_OUTPUT = 80000;
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
-export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = pty.spawn } = {}) {
+async function savedWorkdirs(sessionRoot) {
+  let projects;
+  try { projects = await readdir(sessionRoot, { withFileTypes: true }); }
+  catch (error) { if (error.code === 'ENOENT') return []; throw error; }
+  const directories = [sessionRoot, ...projects.filter(entry => entry.isDirectory()).map(entry => join(sessionRoot, entry.name))];
+  const workdirs = new Map();
+  for (const directory of directories) {
+    let entries;
+    try { entries = await readdir(directory, { withFileTypes: true }); } catch { continue; }
+    for (const entry of entries) {
+      if (!entry.isFile() || !entry.name.endsWith('.jsonl')) continue;
+      const file = join(directory, entry.name);
+      try {
+        const handle = await open(file, 'r');
+        let header;
+        try {
+          const buffer = Buffer.alloc(65536);
+          const { bytesRead } = await handle.read(buffer, 0, buffer.length, 0);
+          const end = buffer.indexOf(10);
+          if (end < 0 || end >= bytesRead) continue;
+          header = JSON.parse(buffer.toString('utf8', 0, end));
+        } finally { await handle.close(); }
+        if (header.type !== 'session' || typeof header.cwd !== 'string' || !isAbsolute(header.cwd)) continue;
+        const cwd = resolve(header.cwd);
+        if (!(await stat(cwd)).isDirectory()) continue;
+        const { mtimeMs } = await stat(file);
+        const item = workdirs.get(cwd) ?? { path: cwd, sessionCount: 0, lastUsed: 0 };
+        item.sessionCount++;
+        item.lastUsed = Math.max(item.lastUsed, mtimeMs);
+        workdirs.set(cwd, item);
+      } catch { /* ignore malformed or inaccessible session files */ }
+    }
+  }
+  return [...workdirs.values()].sort((a, b) => b.lastUsed - a.lastUsed || a.path.localeCompare(b.path));
+}
+
+export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = pty.spawn,
+  sessionsRoot = process.env.PI_CODING_AGENT_SESSION_DIR || join(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'), 'sessions') } = {}) {
   const agents = new Map();
   const processes = new Map();
   const edges = new Map();
@@ -111,6 +150,10 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       return;
     }
     if (url.pathname === '/api/state' && req.method === 'GET') return reply(res, 200, snapshot());
+    if (url.pathname === '/api/session-workdirs' && req.method === 'GET') {
+      try { return reply(res, 200, { workdirs: await savedWorkdirs(sessionsRoot) }); }
+      catch (error) { return reply(res, 500, { error: error.message }); }
+    }
     if (url.pathname === '/api/docs' && req.method === 'GET') {
       const backendUrl = `http://127.0.0.1:${server.address().port}`;
       // The web UI passes its own origin, since Vite may rewrite Host when proxying.
