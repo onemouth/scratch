@@ -15,7 +15,7 @@ Open http://127.0.0.1:5173. The API runs at http://127.0.0.1:3001. For a single-
 
 Choose an existing working directory and a first task when creating an agent. Pi starts in interactive mode inside that directory with the first task supplied at launch. Click the terminal to type directly in the Pi TUI; Pi's built-in editor, menus, shortcuts, colors and output appear inside the node. Stop terminates the process. A stopped node keeps its last output and relationships until the server exits. Nothing survives a server restart.
 
-Drag to pan, scroll outside terminals to zoom; drag a node by its header, click it to resize, connect its right handle to another node's left handle to record delegation, click an edge to remove it. Scroll inside a terminal to scroll its output.
+Use the bottom-right pointer toggle: **Mouse** (default) uses right-button drag to pan and the wheel to zoom; **Touchpad** uses two-finger scroll to pan and pinch to zoom (you can also drag empty canvas space). Drag a node by its header, click it to resize, connect its right handle to another node's left handle to record delegation, click an edge to remove it. Scroll inside a terminal to scroll its output.
 
 ## Local API
 
