@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ReactFlow, Background, Controls, Handle, MiniMap, NodeResizer, Position, applyNodeChanges, useReactFlow, ReactFlowProvider } from '@xyflow/react';
+import { ReactFlow, Background, Controls, Handle, MiniMap, NodeResizer, Position, BaseEdge, EdgeLabelRenderer, getBezierPath, applyNodeChanges, useReactFlow, ReactFlowProvider } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -70,6 +70,32 @@ function AgentNode({ id, data, selected }) {
 
 const nodeTypes = { agent: AgentNode };
 
+function DelegationEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data }) {
+  const [editing, setEditing] = useState(false);
+  const [draft, setDraft] = useState('');
+  const cancelled = React.useRef(false);
+  const [path, labelX, labelY] = getBezierPath({ sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition });
+  const save = async () => {
+    setEditing(false);
+    if (cancelled.current) { cancelled.current = false; return; }
+    const label = draft.trim() || 'delegates';
+    if (label !== data.label) {
+      try { await api(`/edges/${id}`, 'PATCH', { label }); }
+      catch (e) { data.onError(e.message); }
+    }
+  };
+  return <>
+    <BaseEdge id={id} path={path} markerEnd={markerEnd} style={{ stroke: '#8aa3e8', strokeWidth: 2 }} />
+    <EdgeLabelRenderer><div className="edge-label-wrap nodrag nopan" style={{ transform: `translate(-50%, -50%) translate(${labelX}px, ${labelY}px)` }} onMouseDown={e => e.stopPropagation()} onClick={e => e.stopPropagation()}>
+      {editing
+        ? <input className="edge-label-input" autoFocus maxLength={120} aria-label="Delegation label" value={draft} onFocus={e => e.target.select()} onChange={e => setDraft(e.target.value)} onBlur={save} onKeyDown={e => { e.stopPropagation(); if (e.key === 'Enter') e.currentTarget.blur(); if (e.key === 'Escape') { cancelled.current = true; e.currentTarget.blur(); } }} />
+        : <button type="button" className="edge-label-button" title="Click to edit label" onClick={() => { setDraft(data.label); setEditing(true); }}>{data.label}</button>}
+    </div></EdgeLabelRenderer>
+  </>;
+}
+
+const edgeTypes = { delegates: DelegationEdge };
+
 function Canvas() {
   const [state, setState] = useState({ agents: [], edges: [] });
   const [nodes, setNodes] = useState([]);
@@ -131,7 +157,7 @@ function Canvas() {
   const onNodesChange = useCallback(changes => setNodes(ns => applyNodeChanges(changes, ns)), []);
   const onNodeDragStop = useCallback((_, node) => { api(`/agents/${node.id}`, 'PATCH', { x: node.position.x, y: node.position.y }).catch(console.error); }, []);
   const onConnect = useCallback(async ({ source, target }) => { try { await api('/edges', 'POST', { source, target }); } catch (e) { setError(e.message); } }, []);
-  const edges = useMemo(() => state.edges.map(edge => ({ ...edge, animated: false, label: 'delegates', style: { stroke: '#8aa3e8', strokeWidth: 2 }, labelStyle: { fill: '#9facce', fontSize: 11 }, markerEnd: { type: 'arrowclosed', color: '#8aa3e8' } })), [state.edges]);
+  const edges = useMemo(() => state.edges.map(edge => ({ ...edge, data: { label: edge.label || 'delegates', onError: setError }, markerEnd: { type: 'arrowclosed', color: '#8aa3e8' } })), [state.edges]);
   const openLaunch = () => { setError(''); setOpen(true); };
   const create = async (e) => {
     e.preventDefault(); setError('');
@@ -143,11 +169,11 @@ function Canvas() {
   };
   return <div className="app">
     <div className="topbar"><div className="brand"><span className="brand-icon">✳</span> Agent Canvas <small>PI WORKSPACE</small></div><div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="primary" onClick={openLaunch}>＋ New agent</button></div></div>
-    <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={pointerMode === 'mouse' ? [2] : true} panOnScroll={pointerMode === 'touchpad'} zoomOnScroll={pointerMode === 'mouse'} zoomOnPinch zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
+    <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={pointerMode === 'mouse' ? [2] : true} panOnScroll={pointerMode === 'touchpad'} zoomOnScroll={pointerMode === 'mouse'} zoomOnPinch zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
       <Background color="#243148" gap={24} size={1} /><Controls /><MiniMap pannable zoomable nodeColor={n => n.data.agent.status === 'running' ? '#9dd9ad' : '#526582'} />
     </ReactFlow>
     {state.agents.length === 0 && <div className="empty"><div className="empty-icon">✳</div><h1>Space for your agents.</h1><p>Start a Pi agent, then connect agents to map real delegation.</p><button type="button" className="primary" onClick={openLaunch}>＋ Create your first agent</button><span>{pointerMode === 'mouse' ? 'Right-drag canvas to pan · Wheel to zoom' : 'Drag or two-finger scroll to pan · Pinch to zoom'}</span></div>}
-    <div className="hint">Drag nodes · Resize selected nodes · Connect handles to delegate · Click edge to remove</div>
+    <div className="hint">Drag nodes · Resize selected nodes · Connect handles to delegate · Click label to edit · Click edge to remove</div>
     <div className="pointer-mode" role="group" aria-label="Canvas pointer mode">
       <button type="button" className={pointerMode === 'mouse' ? 'active' : ''} aria-pressed={pointerMode === 'mouse'} onClick={() => setPointerMode('mouse')} title="Right-drag to pan · Wheel to zoom">Mouse</button>
       <button type="button" className={pointerMode === 'touchpad' ? 'active' : ''} aria-pressed={pointerMode === 'touchpad'} onClick={() => setPointerMode('touchpad')} title="Two-finger scroll to pan · Pinch to zoom">Touchpad</button>

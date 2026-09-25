@@ -73,6 +73,16 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), mode: 'resume', task: 'ignored?' })).status, 400);
     const second = (await request('/api/agents', 'POST', { name: 'child', task: 'help', workdir: process.cwd(), parentId: first.id })).data;
     assert.equal(app.snapshot().edges[0].target, second.id);
+    const relationship = app.snapshot().edges[0];
+    assert.equal(relationship.type, 'delegates');
+    assert.equal(relationship.label, 'delegates');
+    assert.equal((await request(`/api/edges/${relationship.id}`, 'PATCH', { label: 'Reviews tests' })).status, 200);
+    assert.equal(app.snapshot().edges[0].label, 'Reviews tests');
+    assert.equal(app.snapshot().edges[0].type, 'delegates');
+    assert.equal((await request(`/api/edges/${relationship.id}`, 'PATCH', { label: '  ' })).status, 400);
+    assert.equal((await request('/api/edges/missing', 'PATCH', { label: 'x' })).status, 404);
+    const custom = (await request('/api/edges', 'POST', { source: first.id, target: blank.id, label: 'Coordinates' })).data;
+    assert.equal(custom.label, 'Coordinates');
     fakeSpawn.children[0].emit('data', '\u001b[32mHello\u001b[0m');
     assert.match(app.snapshot().agents[0].output, /Hello/);
     ws = new WebSocket(base.replace('http', 'ws') + `/api/terminal/${first.id}`);
@@ -91,7 +101,7 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.equal((await request(`/api/agents/${first.id}`, 'DELETE')).status, 409);
     assert.equal((await request(`/api/agents/${first.id}/stop`, 'POST')).status, 200);
     assert.equal(app.snapshot().agents[0].status, 'stopped');
-    assert.equal(app.snapshot().edges.length, 1);
+    assert.equal(app.snapshot().edges.length, 2);
     assert.equal((await request(`/api/agents/${first.id}`, 'DELETE')).status, 200);
     assert.ok(!app.snapshot().agents.some(agent => agent.id === first.id));
     assert.equal(app.snapshot().edges.length, 0);

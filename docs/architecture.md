@@ -20,7 +20,7 @@ Pi agents ───────── curl to localhost /api/* ─────�
 
 ## Relationships and lifecycle
 
-An edge `source → target` means the source **delegated work** to the target. Creating a child with `parentId` adds that edge; `POST /api/edges` can record delegation between existing agents. An edge is not a message channel and does not orchestrate execution.
+An edge `source → target` means the source **delegated work** to the target. Creating a child with `parentId` adds that edge; `POST /api/edges` can record delegation between existing agents. The edge's display `label` is editable via `PATCH /api/edges/:id`, while its `type` remains `delegates`. An edge is not a message channel and does not orchestrate execution.
 
 An agent is `running` while its Pi process exists and `stopped` after exit or Stop. A finished Pi task leaves the interactive process available for follow-up prompts. Stopping a process keeps the node, its last output and all relationships until the server exits or a human removes it. Only a fully stopped node can be removed; removal deletes its in-memory node, terminal replay and incident edges, but never Pi's saved session files. Pi saves sessions independently, which can later be chosen via Resume; the server itself does not restore canvas nodes, relationships or terminals after restart.
 

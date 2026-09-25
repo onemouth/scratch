@@ -81,12 +81,17 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     if (!agent) throw Object.assign(new Error('Agent not found'), { status: 404 });
     return agent;
   };
-  const connect = (source, target) => {
+  const edgeLabel = (value) => {
+    if (typeof value !== 'string' || !validText(value, 120)) throw new Error('label must be 1–120 characters');
+    return value.trim();
+  };
+  const connect = (source, target, label = 'delegates') => {
     requireAgent(source); requireAgent(target);
+    const displayLabel = edgeLabel(label);
     if (source === target) throw new Error('Cannot delegate to self');
     const existing = [...edges.values()].find((edge) => edge.source === source && edge.target === target);
     if (existing) return existing;
-    const edge = { id: randomUUID(), source, target, type: 'delegates' };
+    const edge = { id: randomUUID(), source, target, type: 'delegates', label: displayLabel };
     edges.set(edge.id, edge);
     broadcast();
     return edge;
@@ -177,8 +182,14 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Expected JSON object');
         }
         if (url.pathname === '/api/agents' && req.method === 'POST') return reply(res, 201, createAgent(body));
-        if (url.pathname === '/api/edges' && req.method === 'POST') return reply(res, 201, connect(body.source, body.target));
+        if (url.pathname === '/api/edges' && req.method === 'POST') return reply(res, 201, connect(body.source, body.target, body.label));
         const edgeMatch = url.pathname.match(/^\/api\/edges\/([^/]+)$/);
+        if (edgeMatch && req.method === 'PATCH') {
+          const edge = edges.get(edgeMatch[1]);
+          if (!edge) return reply(res, 404, { error: 'Edge not found' });
+          edge.label = edgeLabel(body.label);
+          broadcast(); return reply(res, 200, edge);
+        }
         if (edgeMatch && req.method === 'DELETE') {
           if (!edges.delete(edgeMatch[1])) return reply(res, 404, { error: 'Edge not found' });
           broadcast(); return reply(res, 200, { ok: true });

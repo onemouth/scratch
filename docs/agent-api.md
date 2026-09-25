@@ -16,7 +16,7 @@ You can use the Agent Canvas API to observe the shared canvas, create Pi agents,
 curl -fsS "$AGENT_CANVAS_URL/api/state"
 ```
 
-Returns `{ "agents": [...], "edges": [...] }`. Agents have `id`, `name`, `workdir`, `task`, `status` (`running` or `stopped`), `note`, recent raw terminal `output`, and layout fields. Edges have `id`, `source`, `target`, and `type: "delegates"`. Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
+Returns `{ "agents": [...], "edges": [...] }`. Agents have `id`, `name`, `workdir`, `task`, `status` (`running` or `stopped`), `note`, recent raw terminal `output`, and layout fields. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
 
 ## Delegate work to a new Pi agent
 
@@ -58,7 +58,16 @@ curl -fsS -X POST "$AGENT_CANVAS_URL/api/edges" \
   -d '{"source":"<DELEGATING_AGENT_ID>","target":"<WORKER_AGENT_ID>"}'
 ```
 
-Duplicate directed edges return the existing edge; self-delegation is rejected. To remove an edge: `curl -fsS -X DELETE "$AGENT_CANVAS_URL/api/edges/<EDGE_ID>"`.
+You may include an optional `"label":"Investigates parser"` (1–120 characters) when creating an edge. A label describes the work; **the relationship type remains `delegates`**. Duplicate directed edges return the existing edge; self-delegation is rejected.
+
+To rename an existing edge:
+
+```sh
+curl -fsS -X PATCH "$AGENT_CANVAS_URL/api/edges/<EDGE_ID>" \
+  -H 'Content-Type: application/json' -d '{"label":"Investigates parser"}'
+```
+
+To remove an edge: `curl -fsS -X DELETE "$AGENT_CANVAS_URL/api/edges/<EDGE_ID>"`.
 
 ## Update your progress note
 

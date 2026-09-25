@@ -41,6 +41,11 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .terminal .xterm-viewport { overflow-y: auto !important; }
 .node-error { padding: 6px 10px; color: #ffb3ad; font-size: 11px; }
 .react-flow__handle { width: 10px; height: 10px; background: #a5a7fa; border: 2px solid #1c2739; }
+.edge-label-wrap { position: absolute; pointer-events: all; }
+.edge-label-button, .edge-label-input { max-width: 230px; background: #25334a; color: #dbe5f7; border: 1px solid #6679a0; border-radius: 6px; padding: 5px 9px; font: 11px 'DM Sans', system-ui, sans-serif; box-shadow: 0 2px 8px #07101e9c; }
+.edge-label-button { cursor: text; }
+.edge-label-button:hover, .edge-label-input:focus { border-color: #a5a7fa; }
+.edge-label-input { width: 170px; outline: none; }
 .empty { position: absolute; z-index: 3; inset: 50% auto auto 50%; transform: translate(-50%, -50%); text-align: center; pointer-events: none; width: 420px; }
 .empty-icon { font-size: 55px; color: #929bf3; }
 .empty h1 { margin: 6px 0; font-size: 27px; letter-spacing: -.03em; }
