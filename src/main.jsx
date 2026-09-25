@@ -49,12 +49,17 @@ function AgentNode({ id, data, selected }) {
   const agent = data.agent;
   const [error, setError] = useState('');
   const stop = async () => { try { await api(`/agents/${id}/stop`, 'POST'); } catch (e) { setError(e.message); } };
+  const remove = async () => {
+    if (!confirm(`Remove ${agent.name} from the canvas? Its saved Pi session will not be deleted.`)) return;
+    try { await api(`/agents/${id}`, 'DELETE'); } catch (e) { setError(e.message); }
+  };
   return <div className={`agent-node ${agent.status}`}>
     <NodeResizer isVisible={selected} minWidth={320} minHeight={240} onResizeEnd={(_, p) => api(`/agents/${id}`, 'PATCH', { width: p.width, height: p.height }).catch(console.error)} />
     <Handle type="target" position={Position.Left} />
     <header className="node-header">
       <span className="status-dot" /><strong title={agent.name}>{agent.name}</strong><span className="badge">{agent.status}</span>
-      {agent.status !== 'stopped' && <button className="icon-btn nodrag" title="Stop agent" onClick={stop}>■</button>}
+      {agent.status === 'running' && <button className="icon-btn nodrag" title="Stop agent" aria-label={`Stop ${agent.name}`} onClick={stop}>■</button>}
+      {agent.status === 'stopped' && <button className="icon-btn nodrag" title="Remove node from canvas" aria-label={`Remove ${agent.name} from canvas`} onClick={remove}>×</button>}
     </header>
     <div className="node-subtitle" title={agent.workdir}>{agent.workdir}</div>
     {agent.note && <div className="node-note" title={agent.note}>{agent.note}</div>}

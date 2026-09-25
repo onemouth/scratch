@@ -77,10 +77,13 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     await request(`/api/agents/${first.id}`, 'PATCH', { note: 'Investigating', x: 50, width: 520 });
     assert.equal(app.snapshot().agents[0].note, 'Investigating');
     assert.equal(app.snapshot().agents[0].width, 520);
+    assert.equal((await request(`/api/agents/${first.id}`, 'DELETE')).status, 409);
     assert.equal((await request(`/api/agents/${first.id}/stop`, 'POST')).status, 200);
     assert.equal(app.snapshot().agents[0].status, 'stopped');
     assert.equal(app.snapshot().edges.length, 1);
-    await request(`/api/edges/${app.snapshot().edges[0].id}`, 'DELETE');
+    assert.equal((await request(`/api/agents/${first.id}`, 'DELETE')).status, 200);
+    assert.ok(!app.snapshot().agents.some(agent => agent.id === first.id));
     assert.equal(app.snapshot().edges.length, 0);
+    assert.equal((await request(`/api/agents/${first.id}`, 'DELETE')).status, 404);
   } finally { ws?.terminate(); await app.close(); }
 });

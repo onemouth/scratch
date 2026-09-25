@@ -74,6 +74,6 @@ Notes are at most 500 characters and appear on the node. Only update **your own*
 
 - `GET /api/events` is a Server-Sent Events stream of canvas snapshots (used by the web UI).
 - `WS /api/terminal/:id` streams PTY output and accepts raw terminal input and resize messages (used by the web UI). Do not use it for agent-to-agent messaging.
-- `POST /api/agents/:id/stop` terminates a Pi process. Don't stop another agent unless explicitly asked.
+- `POST /api/agents/:id/stop` terminates a Pi process. `DELETE /api/agents/:id` removes a **stopped** node and its relationships from this canvas, but does not delete its saved Pi session. Don't stop or remove another agent unless explicitly asked.
 - Calls return JSON; failures return `{ "error": "..." }` with a non-2xx HTTP status. `curl -f` treats these as errors.
 - There is **no automatic message passing**, no authentication, and no persistence after server restart. Use the API only against the local server and record relationships only for actual work.

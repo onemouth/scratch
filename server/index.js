@@ -144,8 +144,24 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
         if (match) {
           const agent = requireAgent(match[1]);
           if (match[2] === 'stop' && req.method === 'POST') {
-            processes.get(agent.id)?.kill();
-            agent.status = 'stopped'; broadcast();
+            if (processes.has(agent.id)) {
+              agent.status = 'stopping';
+              processes.get(agent.id).kill();
+            }
+            broadcast();
+            return reply(res, 200, { ok: true });
+          }
+          if (!match[2] && req.method === 'DELETE') {
+            if (agent.status !== 'stopped' || processes.has(agent.id)) {
+              throw Object.assign(new Error('Stop the agent before removing it'), { status: 409 });
+            }
+            agents.delete(agent.id);
+            for (const [id, edge] of edges) {
+              if (edge.source === agent.id || edge.target === agent.id) edges.delete(id);
+            }
+            for (const ws of terminals.get(agent.id) || []) ws.terminate();
+            terminals.delete(agent.id);
+            broadcast();
             return reply(res, 200, { ok: true });
           }
           if (!match[2] && req.method === 'PATCH') {
