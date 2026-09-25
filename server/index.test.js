@@ -30,6 +30,17 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
   };
   let ws;
   try {
+    const docs = await fetch(base + '/api/docs');
+    assert.equal(docs.status, 200);
+    assert.match(docs.headers.get('content-type'), /text\/markdown/);
+    const guide = await docs.text();
+    assert.match(guide, /POST \/api\/agents/);
+    assert.ok(guide.includes(`curl -fsS "${base}/api/state"`));
+    assert.ok(!guide.includes('$AGENT_CANVAS_URL'));
+    const browserGuide = await fetch(base + '/api/docs?origin=http%3A%2F%2F127.0.0.1%3A5173');
+    assert.ok((await browserGuide.text()).includes('curl -fsS "http://127.0.0.1:5173/api/state"'));
+    const spoofedGuide = await fetch(base + '/api/docs?origin=https%3A%2F%2Funtrusted.example');
+    assert.ok((await spoofedGuide.text()).includes(`curl -fsS "${base}/api/state"`));
     assert.equal((await request('/api/agents', 'POST', { name: 'test', task: 'hi', workdir: '/definitely/missing' })).status, 400);
     const first = (await request('/api/agents', 'POST', { name: 'parent', task: 'hello', workdir: process.cwd() })).data;
     assert.equal(first.status, 'running');

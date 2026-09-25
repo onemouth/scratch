@@ -2,12 +2,13 @@ import http from 'node:http';
 import pty from 'node-pty';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
-import { existsSync, statSync, createReadStream } from 'node:fs';
+import { existsSync, statSync, createReadStream, readFileSync } from 'node:fs';
 import { resolve, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const dist = join(root, 'dist');
+const apiGuide = join(root, 'API.md');
 const MAX_OUTPUT = 80000;
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
@@ -65,7 +66,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       width: 440, height: 320,
     };
     const base = `http://127.0.0.1:${port}`;
-    const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The canvas API is at ${base}/api. Use your bash tool with curl to interact with it. GET /api/state reads all agents and delegation relationships. POST /api/agents with JSON {"name":"...","workdir":"absolute path","task":"...","parentId":"${id}"} creates a child agent and a delegation edge. POST /api/edges with {"source":"${id}","target":"agent-id"} records delegation without sending messages. PATCH /api/agents/${id} with {"note":"short progress summary"} updates your note. Relationships represent real delegation; only create them when delegating actual work. Never modify canvas coordinates. This API is local to this server.`;
+    const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The canvas API is at ${base}/api. Use your bash tool with curl to interact with it. GET /api/state reads all agents and delegation relationships. POST /api/agents with JSON {"name":"...","workdir":"absolute path","task":"...","parentId":"${id}"} creates a child agent and a delegation edge. POST /api/edges with {"source":"${id}","target":"agent-id"} records delegation without sending messages. PATCH /api/agents/${id} with {"note":"short progress summary"} updates your note. Relationships represent real delegation; only create them when delegating actual work. Never modify canvas coordinates. This API is local to this server. Read the full guide with curl -fsS ${base}/api/docs when you need examples or details.`;
     let child;
     try {
       child = spawnAgent('pi', ['--no-session', '--name', agent.name, '--append-system-prompt', instructions, '--', agent.task], {
@@ -103,6 +104,16 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       return;
     }
     if (url.pathname === '/api/state' && req.method === 'GET') return reply(res, 200, snapshot());
+    if (url.pathname === '/api/docs' && req.method === 'GET') {
+      const backendUrl = `http://127.0.0.1:${server.address().port}`;
+      // The web UI passes its own origin, since Vite may rewrite Host when proxying.
+      const requestedOrigin = url.searchParams.get('origin');
+      const canvasUrl = requestedOrigin === 'http://127.0.0.1:5173' ? requestedOrigin : backendUrl;
+      const guide = readFileSync(apiGuide, 'utf8').replaceAll('$AGENT_CANVAS_URL', canvasUrl);
+      res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' });
+      res.end(guide);
+      return;
+    }
     if (url.pathname.startsWith('/api/')) {
       try {
         let body = {};

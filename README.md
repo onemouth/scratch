@@ -17,10 +17,15 @@ Choose an existing working directory and a first task when creating an agent. Pi
 
 Use the bottom-right pointer toggle: **Mouse** (default) uses right-button drag to pan and the wheel to zoom; **Touchpad** uses two-finger scroll to pan and pinch to zoom (you can also drag empty canvas space). Drag a node by its header, click it to resize, connect its right handle to another node's left handle to record delegation, click an edge to remove it. Scroll inside a terminal to scroll its output.
 
+## API guide for agents
+
+Click **API Guide** in the top bar to read and copy a complete Markdown guide into any agent. The served guide at [`/api/docs`](http://127.0.0.1:3001/api/docs) replaces URL variables in [`API.md`](API.md) with the address you use to open it: port 5173 via the development proxy, or port 3001 directly. Its commands can be pasted directly. A Canvas-launched agent already gets a short system-prompt introduction plus the docs URL; an external agent may still need its Canvas node ID from you.
+
 ## Local API
 
 Agents receive `AGENT_CANVAS_URL` and `AGENT_CANVAS_ID` and a system prompt explaining the endpoints. Calls are JSON over HTTP; the server only binds to localhost and rejects foreign browser origins. This is a local tool, not a multi-user or publicly exposed service.
 
+- `GET /api/docs` — the copyable Markdown API guide.
 - `GET /api/state` — agents (including status, notes and recent raw terminal output), directed edges.
 - `POST /api/agents` — `{ "name": "Worker", "workdir": "/absolute/path", "task": "Do X", "parentId": "optional-parent-id" }`. A `parentId` automatically records a delegation edge; no task messages are forwarded separately.
 - `PATCH /api/agents/:id` — `{ "note": "Progress summary" }` (human UI also writes `x`, `y`, `width`, `height`).
