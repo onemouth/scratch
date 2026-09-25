@@ -1,0 +1,34 @@
+# Development
+
+## Prerequisites
+
+- Node.js 22+ and npm
+- `pi` on your `PATH`, with a model/provider configured and authenticated
+- A compiler toolchain if `node-pty` cannot use a prebuilt binary. On macOS the project's `postinstall` script fixes the executable permission on node-pty's `spawn-helper` when needed.
+
+## Run and verify
+
+```sh
+npm install
+npm run dev       # browser: http://127.0.0.1:5173 ; API: http://127.0.0.1:3001
+npm test          # API and PTY bridge tests (mock Pi process; no model calls)
+npm run build
+npm start         # serves built app and API together on http://127.0.0.1:3001
+```
+
+Vite proxies `/api` (including the terminal WebSocket) to the Node server in development. If you change the API port, update both `PORT` for the server and the proxy target in `vite.config.js`. Avoid running `npm start` and `npm run dev` simultaneously on port 3001.
+
+For a manual end-to-end check: create an Agent in the browser with an existing workdir and a simple task; confirm its Pi TUI appears, typing reaches Pi, resizing adjusts the terminal, the Guide's copied URL uses the browser port, and Stop leaves the node visible. This invokes your configured model; the automated tests do not.
+
+## Source map
+
+- `server/index.js` — in-memory state, validation, Pi PTYs, HTTP/SSE/WebSocket, static production assets, served API guide.
+- `server/index.test.js` — API lifecycle, delegation, terminal I/O and guide URL tests using a fake PTY.
+- `src/main.jsx` — canvas and terminal browser UI.
+- `src/style.css` — canvas, nodes, terminal and guide styling.
+- `docs/agent-api.md` — single source for the copyable agent-facing API guide (the server substitutes `$AGENT_CANVAS_URL` when serving it).
+- `docs/architecture.md` — runtime data flow and boundaries.
+
+## Current scope
+
+No database, process restart recovery, multi-user access, agent-to-agent message forwarding or workflow scheduler. Keep UI coordinates out of instructions to agents: agents describe work and delegation, while the browser controls spatial layout. See [architecture](architecture.md) and [agent API guide](agent-api.md) for details.
