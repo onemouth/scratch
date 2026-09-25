@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { lockCanvas, loadCanvas, saveCanvas } from './canvas-store.js';
 import pty from 'node-pty';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
@@ -50,7 +51,7 @@ async function savedWorkdirs(sessionRoot) {
   return [...workdirs.values()].sort((a, b) => b.lastUsed - a.lastUsed || a.path.localeCompare(b.path));
 }
 
-export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = pty.spawn,
+export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = pty.spawn, stateFile = null,
   sessionsRoot = process.env.PI_CODING_AGENT_SESSION_DIR || join(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'), 'sessions') } = {}) {
   const agents = new Map();
   const processes = new Map();
@@ -60,8 +61,28 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   const terminals = new Map();
   const wss = new WebSocketServer({ noServer: true });
   let pending = false;
-  const snapshot = () => ({ agents: [...agents.values()], edges: [...edges.values()], notes: [...notes.values()] });
+  let closing = false;
+  let started = false;
+  let resetting = false;
+  let closePromise;
+  let unlock = () => {};
+  let saveTimer;
+  let saveError = '';
+  const runs = new Map();
+  const snapshot = () => ({ agents: [...agents.values()], edges: [...edges.values()], notes: [...notes.values()], persistence: { enabled: !!stateFile, error: saveError } });
+  const flush = () => {
+    clearTimeout(saveTimer);
+    saveTimer = undefined;
+    if (!started) return;
+    try { saveCanvas(stateFile, snapshot()); saveError = ''; }
+    catch (error) { saveError = error.message; console.error('Canvas save failed:', error.message); }
+  };
   const broadcast = () => {
+    if (closing || resetting) return;
+    if (stateFile) { clearTimeout(saveTimer); saveTimer = setTimeout(() => { flush(); publish(); }, 250); }
+    publish();
+  };
+  const publish = () => {
     if (pending) return;
     pending = true;
     setTimeout(() => {
@@ -138,25 +159,59 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       y: Number.isFinite(body.y) ? body.y : 100 + Math.floor(index / 3) * 380,
       width: 440, height: 320,
     };
-    const base = `http://127.0.0.1:${port}`;
+    startAgent(agent);
+    if (body.parentId) connect(body.parentId, id);
+    return agent;
+  };
+  const startAgent = (agent, restoring = false, picker = false) => {
+    const { id, workdir, mode } = agent;
+    if (!existsSync(workdir) || !statSync(workdir).isDirectory()) throw new Error('workdir no longer exists; restore the directory and retry');
+    let exactSession = false;
+    if (restoring && !picker && agent.sessionFile) {
+      try {
+        const lines = readFileSync(agent.sessionFile, 'utf8').trim().split('\n').map(line => JSON.parse(line));
+        if (lines[0]?.type !== 'session' || lines[0]?.id !== agent.sessionId) throw new Error('Session identity mismatch');
+        exactSession = true;
+      } catch { /* missing or invalid session: open the picker rather than a new conversation */ }
+    }
+    agent.restoreWarning = restoring && !exactSession ? 'Original session unavailable. Select a conversation in Pi’s session picker.' : '';
+    agent.status = 'running';
+    agent.output = '';
+    const runToken = randomUUID();
+    runs.set(id, { token: runToken, ready: false });
+    const base = `http://127.0.0.1:${server.address()?.port || port}`;
     const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The canvas API is at ${base}/api. Use your bash tool with curl to interact with it. GET /api/state reads all agents and delegation relationships. POST /api/agents with JSON {"name":"...","workdir":"absolute path","task":"...","parentId":"${id}"} creates a child agent and a delegation edge. POST /api/edges with {"source":"${id}","target":"agent-id"} records delegation without sending messages. POST /api/messages with {"toId":"agent-id","fromId":"${id}","text":"..."} sends an explicit message to a running agent's Pi TTY; use toName instead of toId only when the name is unique. PATCH /api/agents/${id} with {"note":"short progress summary"} updates your note. Relationships represent real delegation; only create them when delegating actual work. Never modify canvas coordinates. This API is local to this server. Read the full guide with curl -fsS ${base}/api/docs when you need examples or details.`;
     let child;
     try {
-      const args = mode === 'resume'
-        ? ['--resume', '--append-system-prompt', instructions]
-        : ['--name', agent.name, '--append-system-prompt', instructions, ...(agent.task ? ['--', agent.task] : [])];
+      const common = ['--extension', join(root, 'server', 'pi-session-tracker.js'), '--append-system-prompt', instructions];
+      const args = restoring
+        ? [...(exactSession ? ['--session', agent.sessionFile] : ['--resume']), ...common]
+        : mode === 'resume' ? ['--resume', ...common]
+          : ['--name', agent.name, ...common, ...(agent.task ? ['--', agent.task] : [])];
       child = spawnAgent('pi', args, {
         cwd: workdir, cols: 50, rows: 16, name: 'xterm-256color',
-        env: { ...process.env, TERM: 'xterm-256color', PI_IMAGE_PROTOCOL: 'none', AGENT_CANVAS_URL: base, AGENT_CANVAS_ID: id },
+        env: { ...process.env, TERM: 'xterm-256color', PI_IMAGE_PROTOCOL: 'none', AGENT_CANVAS_URL: base, AGENT_CANVAS_ID: id, AGENT_CANVAS_RUN: runToken },
       });
-    } catch (error) { throw Object.assign(new Error(`Could not start pi: ${error.message}`), { status: 500 }); }
+    } catch (error) {
+      runs.delete(id);
+      agent.status = 'stopped';
+      throw Object.assign(new Error(`Could not start pi: ${error.message}`), { status: 500 });
+    }
     agents.set(id, agent);
     processes.set(id, child);
-    if (body.parentId) connect(body.parentId, id);
+    for (const ws of terminals.get(id) || []) if (ws.readyState === WebSocket.OPEN) ws.send('\x1bc');
     child.onData((data) => output(agent, data));
     child.onExit(({ exitCode, signal }) => {
+      if (processes.get(id) !== child) return;
       processes.delete(id);
+      const run = runs.get(id);
+      runs.delete(id);
+      const wasStopping = agent.status === 'stopping';
       agent.status = 'stopped';
+      if (!closing && !wasStopping && restoring && exactSession && !run?.ready && exitCode !== 0 && agents.has(id)) {
+        try { startAgent(agent, true, true); return; }
+        catch (error) { agent.restoreWarning = error.message; }
+      }
       output(agent, `\r\n[Pi exited: ${signal ? `signal ${signal}` : `code ${exitCode}`}]\r\n`);
       broadcast();
     });
@@ -164,11 +219,22 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     return agent;
   };
 
+  const stopProcesses = async () => {
+    await Promise.all([...processes.values()].map(child => new Promise((resolveStop, rejectStop) => {
+      let timeout;
+      let escalation;
+      const cleanup = () => { clearTimeout(timeout); clearTimeout(escalation); };
+      child.onExit(() => { cleanup(); resolveStop(); });
+      escalation = setTimeout(() => { try { child.kill('SIGKILL'); } catch { /* exit may already be in flight */ } }, 1500);
+      timeout = setTimeout(() => { cleanup(); rejectStop(new Error('A Pi process did not stop; Canvas has not been cleared')); }, 3500);
+      try { child.kill(); } catch (error) { cleanup(); rejectStop(error); }
+    })));
+  };
   const reply = (res, status, value) => {
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(value));
   };
-  const allowedOrigin = (origin) => !origin || [`http://127.0.0.1:${port}`, 'http://127.0.0.1:5173'].includes(origin);
+  const allowedOrigin = (origin) => !origin || [`http://127.0.0.1:${server.address()?.port || port}`, 'http://127.0.0.1:5173'].includes(origin);
   const handler = async (req, res) => {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
     if (!allowedOrigin(req.headers.origin)) return reply(res, 403, { error: 'Cross-origin requests are not allowed' });
@@ -205,6 +271,35 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           }
           if (raw) body = JSON.parse(raw);
           if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Expected JSON object');
+        }
+        if (closing || resetting) return reply(res, 503, { error: 'Canvas is shutting down or resetting' });
+        if (url.pathname === '/api/canvas/reset' && req.method === 'POST') {
+          if (body.confirm !== true) throw new Error('Reset requires confirm: true');
+          resetting = true;
+          clearTimeout(saveTimer);
+          for (const agent of agents.values()) if (processes.has(agent.id)) agent.status = 'stopping';
+          try { await stopProcesses(); }
+          catch (error) { resetting = false; broadcast(); throw error; }
+          processes.clear(); runs.clear();
+          for (const group of terminals.values()) for (const ws of group) ws.terminate();
+          terminals.clear(); agents.clear(); notes.clear(); edges.clear();
+          resetting = false;
+          flush(); publish();
+          if (saveError) return reply(res, 500, { error: `Canvas cleared in memory but could not save reset: ${saveError}` });
+          return reply(res, 200, { ok: true });
+        }
+        const sessionMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/session$/);
+        if (sessionMatch && req.method === 'POST') {
+          const agent = requireAgent(sessionMatch[1]);
+          const run = runs.get(agent.id);
+          if (!run || body.runToken !== run.token) return reply(res, 409, { error: 'Stale Pi process' });
+          if (body.sessionFile !== null && (!validText(body.sessionFile, 4096) || !isAbsolute(body.sessionFile))) throw new Error('Invalid session file');
+          if (!validText(body.sessionId, 100)) throw new Error('Invalid session ID');
+          agent.sessionFile = body.sessionFile;
+          agent.sessionId = body.sessionId;
+          run.ready = true;
+          agent.restoreWarning = '';
+          broadcast(); return reply(res, 200, { ok: true });
         }
         if (url.pathname === '/api/agents' && req.method === 'POST') return reply(res, 201, createAgent(body));
         if (url.pathname === '/api/messages' && req.method === 'POST') return reply(res, 202, sendMessage(body));
@@ -244,9 +339,15 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           if (!edges.delete(edgeMatch[1])) return reply(res, 404, { error: 'Edge not found' });
           broadcast(); return reply(res, 200, { ok: true });
         }
-        const match = url.pathname.match(/^\/api\/agents\/([^/]+)(?:\/(stop))?$/);
+        const match = url.pathname.match(/^\/api\/agents\/([^/]+)(?:\/(stop|resume))?$/);
         if (match) {
           const agent = requireAgent(match[1]);
+          if (match[2] === 'resume' && req.method === 'POST') {
+            if (processes.has(agent.id)) return reply(res, 409, { error: 'Agent is already running' });
+            try { startAgent(agent, true); }
+            catch (error) { agent.status = 'stopped'; agent.restoreWarning = error.message; broadcast(); throw error; }
+            return reply(res, 200, agent);
+          }
           if (match[2] === 'stop' && req.method === 'POST') {
             if (processes.has(agent.id)) {
               agent.status = 'stopping';
@@ -325,20 +426,48 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   });
   return {
     server, snapshot,
-    listen: () => new Promise((resolveListen) => server.listen(port, '127.0.0.1', resolveListen)),
-    close: () => new Promise((resolveClose) => {
-      for (const client of clients) client.end();
-      for (const group of terminals.values()) for (const ws of group) ws.terminate();
-      wss.close();
-      for (const child of processes.values()) child.kill();
-      server.close(resolveClose);
-    }),
+    listen: async () => {
+      unlock = lockCanvas(stateFile);
+      let saved;
+      try { saved = loadCanvas(stateFile); } // Fail closed: never overwrite a corrupt save.
+      catch (error) { unlock(); throw error; }
+      if (saved) {
+        for (const agent of saved.agents) agents.set(agent.id, agent);
+        for (const edge of saved.edges) edges.set(edge.id, edge);
+        for (const note of saved.notes) notes.set(note.id, note);
+      }
+      try {
+        await new Promise((resolveListen, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolveListen); });
+      } catch (error) { unlock(); throw error; }
+      started = true;
+      for (const agent of agents.values()) {
+        if (agent.status !== 'running') { agent.status = 'stopped'; continue; }
+        try { startAgent(agent, true); }
+        catch (error) { agent.status = 'stopped'; agent.restoreWarning = error.message; }
+      }
+      broadcast();
+    },
+    close: () => {
+      if (closePromise) return closePromise;
+      flush(); // Save running intent BEFORE shutdown kills change process status.
+      closing = true;
+      closePromise = (async () => {
+        for (const client of clients) client.end();
+        for (const group of terminals.values()) for (const ws of group) ws.terminate();
+        wss.close();
+        await stopProcesses();
+        await new Promise(resolveClose => server.close(resolveClose));
+        unlock();
+      })();
+      return closePromise;
+    },
   };
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const app = createApp();
-  app.listen().then(() => console.log(`Agent Canvas API: http://127.0.0.1:${process.env.PORT || 3001}`));
+  const stateFile = resolve(process.env.AGENT_CANVAS_STATE_FILE || join(homedir(), '.agent-canvas', 'canvas.json'));
+  const app = createApp({ stateFile });
+  app.listen().then(() => console.log(`Agent Canvas API: http://127.0.0.1:${process.env.PORT || 3001}\nCanvas save: ${stateFile}`)).catch(error => { console.error(error.message); process.exit(1); });
   process.on('SIGINT', () => app.close().then(() => process.exit(0)));
   process.on('SIGTERM', () => app.close().then(() => process.exit(0)));
 }

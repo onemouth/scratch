@@ -16,7 +16,7 @@ You can use the Agent Canvas API to observe the shared canvas, create Pi agents,
 curl -fsS "$AGENT_CANVAS_URL/api/state"
 ```
 
-Returns `{ "agents": [...], "edges": [...], "notes": [...] }`. Agents have `id`, `name`, `workdir`, `task`, `status` (`running` or `stopped`), `note`, recent raw terminal `output`, and layout fields. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
+Returns `{ "agents": [...], "edges": [...], "notes": [...], "persistence": { "enabled": true, "error": "" } }`. Agents have `id`, `name`, `workdir`, `task`, `status` (`running` or `stopped`), `note`, recent raw terminal `output`, and layout fields. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
 
 ## Delegate work to a new Pi agent
 
@@ -26,7 +26,7 @@ curl -fsS -X POST "$AGENT_CANVAS_URL/api/agents" \
   -d '{"name":"Researcher","workdir":"/absolute/path/to/project","task":"Investigate the parser and report findings","parentId":"<YOUR_AGENT_ID>"}'
 ```
 
-Required: `name` (max 100 chars) and `workdir` (existing directory; use an absolute path). For a new session, `task` is optional: when omitted, Pi opens interactively with an empty editor; when supplied, it runs as the initial instruction. When delegating work, supply a specific task so the worker knows what to do. Optional: `parentId`, the ID of the delegating agent. Supplying `parentId` **automatically creates a directed `delegates` edge** from parent to child. The response contains the new agent's ID. Omit `parentId` to create an independent agent. Each agent has its own Pi process; both can work in the same directory, so coordinate edits to avoid conflicts. New Pi sessions are saved by Pi, but the Canvas layout is not persisted.
+Required: `name` (max 100 chars) and `workdir` (existing directory; use an absolute path). For a new session, `task` is optional: when omitted, Pi opens interactively with an empty editor; when supplied, it runs as the initial instruction. When delegating work, supply a specific task so the worker knows what to do. Optional: `parentId`, the ID of the delegating agent. Supplying `parentId` **automatically creates a directed `delegates` edge** from parent to child. The response contains the new agent's ID. Omit `parentId` to create an independent agent. Each agent has its own Pi process; both can work in the same directory, so coordinate edits to avoid conflicts. Pi saves conversations and Canvas auto-saves node metadata, layout, notes and relationships.
 
 When launched by the Canvas, substitute your ID by constructing the JSON safely (for example with `jq`):
 
@@ -105,7 +105,15 @@ Notes are at most 500 characters and appear on the node. Only update **your own*
 
 ## Canvas sticky notes
 
-Sticky notes are independent text nodes, not agents or delegation targets. `POST /api/notes` creates one with optional `title` (1–100 characters, trimmed, defaults to `Note`) and `text` (up to 10,000 characters, empty allowed). `PATCH /api/notes/:id` updates its `title` or `text`; `DELETE /api/notes/:id` removes it. State includes `notes` with `id`, `title`, `text`, and layout fields. Layout fields (`x`, `y`, `width`, `height`; minimum size 160) are for the human UI. Notes exist only until server restart. Only edit or remove a user's notes when asked.
+Sticky notes are independent text nodes, not agents or delegation targets. `POST /api/notes` creates one with optional `title` (1–100 characters, trimmed, defaults to `Note`) and `text` (up to 10,000 characters, empty allowed). `PATCH /api/notes/:id` updates its `title` or `text`; `DELETE /api/notes/:id` removes it. State includes `notes` with `id`, `title`, `text`, and layout fields. Layout fields (`x`, `y`, `width`, `height`; minimum size 160) are for the human UI. Notes are auto-saved across server restarts. Only edit or remove a user's notes when asked.
+
+## Restore and reset
+
+On server restart, previously running agents reopen their recorded session without sending a prompt or replaying interrupted work. A missing/invalid session falls back to Pi's picker. Missing workdirs leave stopped nodes with `restoreWarning`. Previously stopped nodes stay stopped. `POST /api/agents/:id/resume` reopens a stopped node's conversation (or picker), retaining its ID and edges. Do not resume another agent unless asked.
+
+`POST /api/canvas/reset` with `{"confirm":true}` stops all agents and clears/saves an empty Canvas. **Only do this when the user explicitly requests resetting the entire Canvas.** Pi sessions and project files are not deleted. The browser provides confirmation; API clients must obtain user confirmation themselves.
+
+The internal `POST /api/agents/:id/session` callback is reserved for the bundled Pi session tracker; agents should not call it. It records session identity on startup and session changes without sending messages. `sessionFile` and `sessionId` on agent records identify the conversation, not the Canvas node.
 
 ## Other interfaces and boundaries
 
@@ -114,4 +122,4 @@ Sticky notes are independent text nodes, not agents or delegation targets. `POST
 - `WS /api/terminal/:id` streams PTY output and accepts raw terminal input and resize messages (used by the web UI). Prefer `POST /api/messages` for explicit agent-to-agent messages.
 - `POST /api/agents/:id/stop` terminates a Pi process. `DELETE /api/agents/:id` removes a **stopped** node and its relationships from this canvas, but does not delete its saved Pi session. Don't stop or remove another agent unless explicitly asked.
 - Calls return JSON; failures return `{ "error": "..." }` with a non-2xx HTTP status. `curl -f` treats these as errors.
-- There is **no automatic message passing**, no authentication, and no persistence after server restart. Use the API only against the local server and record relationships only for actual work.
+- There is **no automatic message passing** and no authentication. A single local Canvas is auto-saved; restoration reopens conversations, not in-flight tasks. Use the API only against the local server and record relationships only for actual work.

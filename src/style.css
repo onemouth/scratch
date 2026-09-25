@@ -2,6 +2,7 @@
 :root { font-family: 'DM Sans', system-ui, sans-serif; color: #e7edfa; background: #101724; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; }
+.save-error { position: fixed; top: 65px; left: 20px; right: 20px; z-index: 100; padding: 12px; background: #6b2727; color: white; border-radius: 6px; }
 .sticky-note { width: 100%; height: 100%; display: flex; flex-direction: column; background: #f7e4a0; color: #493b1d; border: 1px solid #cdb468; border-radius: 8px; box-shadow: 0 6px 20px #0003; overflow: hidden; }
 .sticky-note header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: #efd382; cursor: grab; }
 .sticky-note header .icon-btn { color: #493b1d; flex-shrink: 0; }

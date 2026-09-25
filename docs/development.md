@@ -20,9 +20,14 @@ Vite proxies `/api` (including the terminal WebSocket) to the Node server in dev
 
 For a manual end-to-end check: choose a saved Pi session folder from the workdir dropdown (or enter one manually), then create an Agent in the browser; confirm its empty Pi TUI appears, type a simple task into the terminal, check resizing, create an edge and edit its label, check the Guide's copied URL and that Stop leaves the node visible. Remove the stopped node and check that its edges disappear, then try **Resume · pi -r** in the same workdir and choose that saved Pi session. Sending a task invokes your configured model; the automated tests do not.
 
+For persistence checks, set `AGENT_CANVAS_STATE_FILE` to a temporary path. Create nodes and notes, restart the server, and verify the same IDs/layout return and running nodes reopen conversations without a task. Stop one node before restarting and verify it stays stopped. Test a missing session/workdir, then Reset Canvas and restart again to confirm it stays empty. Never run reset tests against your working Canvas.
+
 ## Source map
 
-- `server/index.js` — in-memory state, validation, Pi PTYs, HTTP/SSE/WebSocket, static production assets, served API guide.
+- `server/index.js` — live state, auto-save/restore orchestration, validation, Pi PTYs, HTTP/SSE/WebSocket, static production assets, served API guide.
+- `server/canvas-store.js` — snapshot validation, atomic save and previous-save backup.
+- `server/pi-session-tracker.js` — Pi lifecycle extension reporting exact conversation identity.
+- `server/persistence.test.js` — isolated save/restart, fallback, reset and corruption tests.
 - `server/index.test.js` — API lifecycle, saved-session workdirs, delegation, explicit TTY messaging, terminal I/O and guide URL tests using a fake PTY.
 - `src/main.jsx` — canvas and terminal browser UI.
 - `src/style.css` — canvas, nodes, terminal and guide styling.
@@ -31,4 +36,4 @@ For a manual end-to-end check: choose a saved Pi session folder from the workdir
 
 ## Current scope
 
-No database, canvas restart recovery, multi-user access, automatic agent-to-agent message forwarding or workflow scheduler. Explicit messages to existing running nodes use `POST /api/messages` and write to their TTYs; a successful response does not prove the recipient processed the text. Pi sessions are saved by Pi and can be picked again with `pi -r`, but Canvas nodes and relationships are not persisted. Keep UI coordinates out of instructions to agents: agents describe work and delegation, while the browser controls spatial layout. See [architecture](architecture.md) and [agent API guide](agent-api.md) for details.
+No database, multiple named canvases, multi-user access, automatic agent-to-agent message forwarding or workflow scheduler. Explicit messages to existing running nodes use `POST /api/messages` and write to their TTYs; a successful response does not prove the recipient processed the text. The single Canvas is auto-saved to a local JSON file. Pi sessions are saved by Pi; Canvas restore reopens the exact conversation when available, falling back to `pi -r` without replaying interrupted work. Keep UI coordinates out of instructions to agents: agents describe work and delegation, while the browser controls spatial layout. See [architecture](architecture.md) and [agent API guide](agent-api.md) for details.

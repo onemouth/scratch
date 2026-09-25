@@ -71,11 +71,13 @@ function AgentNode({ id, data, selected }) {
     <header className="node-header">
       <span className="status-dot" /><strong title={agent.name}>{agent.name}</strong><span className="badge">{agent.status}</span>
       {agent.status === 'running' && <button className="icon-btn nodrag" title="Stop agent" aria-label={`Stop ${agent.name}`} onClick={stop}>■</button>}
+      {agent.status === 'stopped' && <button className="icon-btn nodrag" title="Reopen conversation (no task sent)" aria-label={`Resume ${agent.name}`} onClick={() => api(`/agents/${id}/resume`, 'POST').catch(e => setError(e.message))}>▶</button>}
       {agent.status === 'stopped' && <button className="icon-btn nodrag" title="Remove node from canvas" aria-label={`Remove ${agent.name} from canvas`} onClick={remove}>×</button>}
     </header>
     <div className="node-subtitle" title={agent.workdir}>{agent.workdir}</div>
     {agent.note && <div className="node-note" title={agent.note}>{agent.note}</div>}
     <PtyTerminal id={id} stopped={agent.status === 'stopped'} />
+    {agent.restoreWarning && <div className="node-error">{agent.restoreWarning}</div>}
     {error && <div className="node-error">{error}</div>}
     <Handle type="source" position={Position.Right} />
   </div>;
@@ -200,6 +202,11 @@ function Canvas() {
   const onNodeDragStop = useCallback((_, node) => { api(`/${node.type === 'note' ? 'notes' : 'agents'}/${node.id}`, 'PATCH', { x: node.position.x, y: node.position.y }).catch(console.error); }, []);
   const onConnect = useCallback(async ({ source, target }) => { try { await api('/edges', 'POST', { source, target }); } catch (e) { setError(e.message); } }, []);
   const edges = useMemo(() => state.edges.map(edge => ({ ...edge, data: { label: edge.label || 'delegates', onError: setError }, markerEnd: { type: 'arrowclosed', color: '#8aa3e8' } })), [state.edges]);
+  const resetCanvas = async () => {
+    if (!confirm('Reset Canvas? This stops all agents and removes every node, note, and connection. Pi sessions and project files are NOT deleted. Running work will be interrupted.')) return;
+    try { await api('/canvas/reset', 'POST', { confirm: true }); setError(''); }
+    catch (e) { setError(e.message); }
+  };
   const openLaunch = () => { setError(''); setOpen(true); };
   const createNote = async () => {
     const position = screenToFlowPosition({ x: innerWidth / 2 - 140, y: innerHeight / 2 - 110 });
@@ -214,7 +221,7 @@ function Canvas() {
     } catch (err) { setError(err.message); }
   };
   return <div className="app">
-    <div className="topbar"><div className="brand"><span className="brand-icon">✳</span> Agent Canvas <small>PI WORKSPACE</small></div><div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></div></div>
+    <div className="topbar"><div className="brand"><span className="brand-icon">✳</span> Agent Canvas <small>PI WORKSPACE</small></div><div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button" onClick={resetCanvas}>Reset Canvas</button><button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></div></div>
     <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={pointerMode === 'mouse' ? [2] : true} panOnScroll={pointerMode === 'touchpad'} zoomOnScroll={pointerMode === 'mouse'} zoomOnPinch zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
       <Background color="#243148" gap={24} size={1} /><Controls /><MiniMap pannable zoomable nodeColor={n => n.type === 'note' ? '#f4d77b' : n.data.agent.status === 'running' ? '#9dd9ad' : '#526582'} />
     </ReactFlow>
@@ -224,6 +231,7 @@ function Canvas() {
       <button type="button" className={pointerMode === 'mouse' ? 'active' : ''} aria-pressed={pointerMode === 'mouse'} onClick={() => setPointerMode('mouse')} title="Right-drag to pan · Wheel to zoom">Mouse</button>
       <button type="button" className={pointerMode === 'touchpad' ? 'active' : ''} aria-pressed={pointerMode === 'touchpad'} onClick={() => setPointerMode('touchpad')} title="Two-finger scroll to pan · Pinch to zoom">Touchpad</button>
     </div>
+    {state.persistence?.error && <div className="save-error" role="alert">Canvas is not saved: {state.persistence.error}</div>}
     {error && !open && <div className="toast" onClick={() => setError('')}>{error} ×</div>}
     {docsOpen && <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) setDocsOpen(false); }}><section className="modal guide-modal" role="dialog" aria-modal="true" aria-label="Agent API Guide">
       <div className="modal-head"><div><small>SHARED CANVAS</small><h2>Agent API Guide</h2></div><button type="button" className="icon-btn" aria-label="Close API guide" onClick={() => setDocsOpen(false)}>×</button></div>

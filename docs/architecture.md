@@ -1,6 +1,6 @@
 # Architecture
 
-Agent Canvas is one local Node.js server and a React browser client. The server owns the in-memory canvas and the Pi processes; the browser draws the canvas and acts as a terminal emulator. Nothing is stored across server restarts.
+Agent Canvas is one local Node.js server and a React browser client. The server owns the in-memory canvas and the Pi processes; the browser draws the canvas and acts as a terminal emulator. A single Canvas is auto-saved on disk and restored on restart; Pi conversations remain in Pi's own session files.
 
 ```text
 Human browser ── React Flow canvas ─── HTTP /api/* ─┐
@@ -22,7 +22,17 @@ Pi agents ───────── curl to localhost /api/* ─────�
 
 An edge `source → target` means the source **delegated work** to the target. Creating a child with `parentId` adds that edge; `POST /api/edges` can record delegation between existing agents. The edge's display `label` is editable via `PATCH /api/edges/:id`, while its `type` remains `delegates`. An edge is not a message channel and does not orchestrate execution. Explicit `POST /api/messages` calls can target a running agent by ID or unique name; the server writes bracketed-paste text followed by Enter to that agent's PTY. A 202 response means written to the PTY, not confirmed as processed by Pi. Messaging never creates edges.
 
-An agent is `running` while its Pi process exists and `stopped` after exit or Stop. A finished Pi task leaves the interactive process available for follow-up prompts. Stopping a process keeps the node, its last output and all relationships until the server exits or a human removes it. Only a fully stopped node can be removed; removal deletes its in-memory node, terminal replay and incident edges, but never Pi's saved session files. Pi saves sessions independently, which can later be chosen via Resume; the server itself does not restore canvas nodes, relationships or terminals after restart.
+An agent is `running` while its Pi process exists and `stopped` after exit or Stop. A finished Pi task leaves the interactive process available for follow-up prompts. Stopping a process keeps the node, its last output and all relationships until a human removes it or resets the Canvas. Only a fully stopped node can be removed; removal deletes its in-memory node, terminal replay and incident edges, but never Pi's saved session files. Pi saves sessions independently. The server restores Canvas nodes and relationships and reopens previously running agents' conversations, without replaying their initial task or any terminal input.
+
+## Persistence and session identity
+
+`server/canvas-store.js` validates versioned snapshots and writes them through a flushed temporary file followed by atomic rename; the previous valid save becomes `.bak`. Metadata updates debounce for 250 ms. Graceful shutdown flushes running/stopped intent before terminating processes, so shutdown exits do not overwrite the restore decision. Output is captured in the next metadata save or shutdown flush, not on every streamed byte. Invalid saves fail startup without being overwritten. Save errors are exposed in state and the UI. The default CLI file is `~/.agent-canvas/canvas.json`; `AGENT_CANVAS_STATE_FILE` overrides it. Test instances use `stateFile: null` unless explicitly testing persistence.
+
+`server/pi-session-tracker.js` is passed via Pi's explicit `--extension` option. Its `session_start` hook reports the exact session file and ID on initial startup, resume, new session, fork, and reload. A per-process run token rejects stale callbacks after reset or restart; it is not a general authentication boundary. The extension never sends messages or starts turns. The API binds before Pi launches, so the callback has a live destination.
+
+Restore validates the saved session file and identity, then launches `pi --session <path>` with no task arguments. Missing/invalid sessions use `pi -r`. A nonzero exit before the tracker reports readiness falls back to the picker once; later failures do not cause automatic relaunch loops. Missing workdirs retain a stopped node with a warning. Previously stopped nodes remain stopped and can be explicitly resumed in place. Third-party Pi extensions still run normally and may have their own startup behavior.
+
+Reset requires confirmation, stops all processes (with a bounded SIGKILL escalation), closes terminal sockets, clears state and immediately writes the empty Canvas. Saved Pi sessions and project files are untouched. A PID-based exclusive lock prevents multiple servers from using the same save file; a lock left by a dead process is reclaimed at startup. Browser viewport, pointer mode and unsubmitted editor input are not persisted.
 
 ## Boundaries
 
