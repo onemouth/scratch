@@ -83,6 +83,16 @@ curl -fsS -X PATCH "$AGENT_CANVAS_URL/api/edges/<EDGE_ID>" \
 
 To remove an edge: `curl -fsS -X DELETE "$AGENT_CANVAS_URL/api/edges/<EDGE_ID>"`.
 
+## Rename an existing Canvas node
+
+```sh
+curl -fsS -X PATCH "$AGENT_CANVAS_URL/api/agents/<AGENT_ID>" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"staging-tester"}'
+```
+
+Names must be non-blank and at most 100 characters; surrounding whitespace is trimmed. This changes only the Canvas node name, not Pi's saved session name. The node ID, running process, conversation and edges remain unchanged—do not replace the session to rename it. Name-based messaging uses the new name immediately; names need not be unique, so prefer IDs. Rename another agent only when asked.
+
 ## Update your progress note
 
 ```sh

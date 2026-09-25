@@ -115,6 +115,20 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     await request(`/api/agents/${first.id}`, 'PATCH', { note: 'Investigating', x: 50, width: 520 });
     assert.equal(app.snapshot().agents[0].note, 'Investigating');
     assert.equal(app.snapshot().agents[0].width, 520);
+    const processCount = fakeSpawn.children.length;
+    const renamed = await request(`/api/agents/${first.id}`, 'PATCH', { name: ' staging-tester ' });
+    assert.equal(renamed.status, 200);
+    assert.equal(renamed.data.name, 'staging-tester');
+    assert.equal(renamed.data.id, first.id);
+    assert.equal(fakeSpawn.children.length, processCount);
+    assert.equal(app.snapshot().edges[0].source, first.id);
+    assert.equal((await request('/api/messages', 'POST', { toName: 'staging-tester', text: 'hi' })).status, 202);
+    assert.equal((await request('/api/messages', 'POST', { toName: 'parent', text: 'hi' })).status, 404);
+    for (const name of ['', '   ', null, 123, 'x'.repeat(101)]) {
+      assert.equal((await request(`/api/agents/${first.id}`, 'PATCH', { name })).status, 400);
+    }
+    assert.equal((await request(`/api/agents/${first.id}`, 'PATCH', { name: 'should-not-apply', width: 1 })).status, 400);
+    assert.equal(app.snapshot().agents[0].name, 'staging-tester');
     assert.equal((await request(`/api/agents/${first.id}`, 'DELETE')).status, 409);
     assert.equal((await request(`/api/agents/${first.id}/stop`, 'POST')).status, 200);
     assert.equal(app.snapshot().agents[0].status, 'stopped');

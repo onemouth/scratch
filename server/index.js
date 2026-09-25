@@ -244,16 +244,22 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
             return reply(res, 200, { ok: true });
           }
           if (!match[2] && req.method === 'PATCH') {
+            const updates = {};
+            if (body.name !== undefined) {
+              if (!validText(body.name, 100)) throw new Error('name must be 1–100 characters');
+              updates.name = body.name.trim();
+            }
             if (body.note !== undefined) {
               if (typeof body.note !== 'string' || body.note.length > 500) throw new Error('note must be at most 500 characters');
-              agent.note = body.note;
+              updates.note = body.note;
             }
             for (const key of ['x', 'y', 'width', 'height']) {
               if (body[key] !== undefined) {
                 if (!Number.isFinite(body[key]) || (['width', 'height'].includes(key) && body[key] < 240)) throw new Error(`Invalid ${key}`);
-                agent[key] = body[key];
+                updates[key] = body[key];
               }
             }
+            Object.assign(agent, updates);
             broadcast(); return reply(res, 200, agent);
           }
         }
