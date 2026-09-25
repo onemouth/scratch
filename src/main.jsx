@@ -169,7 +169,14 @@ function Canvas() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   const [connected, setConnected] = useState(false);
-  const [pointerMode, setPointerMode] = useState('mouse');
+  const [pointerMode, setPointerMode] = useState(() => {
+    try { return localStorage.getItem('agent-canvas:pointer-mode') === 'touchpad' ? 'touchpad' : 'mouse'; }
+    catch { return 'mouse'; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('agent-canvas:pointer-mode', pointerMode); }
+    catch { /* Keep controls usable when browser storage is unavailable. */ }
+  }, [pointerMode]);
   const { screenToFlowPosition, setCenter } = useReactFlow();
   const [focusTarget, setFocusTarget] = useState(null);
   const focusSequence = React.useRef(0);
@@ -261,7 +268,7 @@ function Canvas() {
   };
   return <div className="app">
     <div className="topbar"><div className="brand"><span className="brand-icon">✳</span> Agent Canvas <small>PI WORKSPACE</small></div><div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button" onClick={resetCanvas}>Reset Canvas</button><button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></div></div>
-    <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={pointerMode === 'mouse' ? [2] : true} panOnScroll={pointerMode === 'touchpad'} zoomOnScroll={pointerMode === 'mouse'} zoomOnPinch zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
+    <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={pointerMode === 'mouse' ? [2] : true} panOnScroll={pointerMode === 'touchpad'} panOnScrollSpeed={1} zoomOnScroll={pointerMode === 'mouse'} zoomOnPinch zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
       <Background color="#243148" gap={24} size={1} /><Controls /><MiniMap pannable zoomable nodeColor={n => n.type === 'note' ? '#f4d77b' : n.data.agent.status === 'running' ? '#9dd9ad' : '#526582'} />
     </ReactFlow>
     {state.agents.length === 0 && !(state.notes || []).length && <div className="empty"><div className="empty-icon">✳</div><h1>Space for your agents.</h1><p>Start a Pi agent, then connect agents to map real delegation.</p><button type="button" className="primary" onClick={openLaunch}>＋ Create your first agent</button><span>{pointerMode === 'mouse' ? 'Right-drag canvas to pan · Wheel to zoom' : 'Drag or two-finger scroll to pan · Pinch to zoom'}</span></div>}
