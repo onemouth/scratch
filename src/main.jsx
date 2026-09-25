@@ -117,12 +117,15 @@ function StickyNote({ id, data, selected }) {
     try { await api(`/notes/${id}`, 'PATCH', { text }); dirty.current = false; setError(''); }
     catch (e) { setError(e.message); }
   };
-  return <div className="sticky-note" style={{ fontSize }}>
-    <NodeResizer isVisible={selected} minWidth={160} minHeight={160} onResizeEnd={(_, p) => api(`/notes/${id}`, 'PATCH', { width: p.width, height: p.height }).catch(e => setError(e.message))} />
+  return <>
+    <NodeResizer isVisible={selected} minWidth={160} minHeight={160} onResizeEnd={(_, p) => api(`/notes/${id}`, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message))} />
+    <div className="sticky-note" style={{ fontSize }}>
+    <div className="note-drag-handle" title="Drag to move note" />
     <button className="note-delete icon-btn nodrag" aria-label="Delete note" onClick={() => api(`/notes/${id}`, 'DELETE').catch(e => setError(e.message))}>×</button>
     <textarea className="nodrag nowheel" aria-label="Note text" placeholder="Write a note…" maxLength={10000} value={text} onChange={e => { dirty.current = true; setText(e.target.value); }} onBlur={save} />
     {error && <div role="alert">{error}<button className="nodrag" onClick={save}>Retry save</button></div>}
-  </div>;
+    </div>
+  </>;
 }
 const nodeTypes = { agent: AgentNode, note: StickyNote };
 
@@ -221,7 +224,7 @@ function Canvas() {
         };
       }), ...(state.notes || []).map(note => {
         const old = byId.get(note.id);
-        return { id: note.id, type: 'note', position: old?.dragging ? old.position : { x: note.x, y: note.y }, style: { width: note.width, height: note.height }, data: { note }, selected: old?.selected };
+        return { id: note.id, type: 'note', dragHandle: '.note-drag-handle', position: old?.dragging ? old.position : { x: note.x, y: note.y }, style: { width: note.width, height: note.height }, data: { note }, selected: old?.selected };
       })];
     });
   }, [state.agents, state.notes, focusTarget, open, docsOpen, focusAgent]);
