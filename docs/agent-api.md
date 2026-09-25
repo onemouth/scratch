@@ -1,6 +1,6 @@
 # Agent Canvas — Agent API Guide
 
-You can use the Agent Canvas API to observe the shared canvas, create Pi agents, and record **real delegation relationships**. Run these HTTP commands with your shell/bash tool. This server is local to the user's machine; do not expose it to the network.
+You can use the Agent Canvas API to observe the shared canvas, create Pi agents, send explicit messages to running agents, and record **real delegation relationships**. Run these HTTP commands with your shell/bash tool. This server is local to the user's machine; do not expose it to the network.
 
 ## Locate the server and your identity
 
@@ -48,6 +48,20 @@ curl -fsS -X POST "$AGENT_CANVAS_URL/api/agents" \
 
 `mode` defaults to `"new"`; for `"resume"`, omit `task`. The new Canvas node has its own ID even though its Pi session is resumed. You can include `parentId` only when this is an actual delegation.
 
+## Message an existing Pi agent
+
+Use an agent **ID** from `GET /api/state` to address a running node. Include `fromId` when sending from a Canvas agent so the receiver can tell who sent it:
+
+```sh
+jq -n --arg to '<TARGET_AGENT_ID>' --arg from "$AGENT_CANVAS_ID" --arg text 'Hi, please review the test results' \
+  '{toId:$to,fromId:$from,text:$text}' |
+  curl -fsS -X POST "$AGENT_CANVAS_URL/api/messages" -H 'Content-Type: application/json' --data-binary @-
+```
+
+Alternatively, use `{"toName":"Researcher","text":"Hi"}` instead of `toId` **only if the name is unique** (exact match). Specify exactly one of `toId` or `toName`; duplicate names return HTTP 409, missing agents return 404, and stopped agents return 409. `fromId` is optional (for a human or external client) but must be an existing agent ID if supplied. The `text` must be non-blank, at most 10,000 characters, and contain no terminal control characters; ordinary newlines are allowed.
+
+The API returns HTTP 202 once the text has been written to the destination's Pi TTY using bracketed paste followed by Enter. **This is not a delivery/read acknowledgement**: it does not guarantee Pi has processed the message. As with typing into the terminal, avoid sending while the recipient is in a picker, editing an unfinished prompt, or running another terminal application. Sending a message does **not** create a delegation edge. Edges never forward messages automatically.
+
 ## Record or remove a delegation
 
 Use this only if one agent has genuinely delegated work to another **existing** agent. This records a relationship; it does **not** send a message or task to the target.
@@ -83,7 +97,7 @@ Notes are at most 500 characters and appear on the node. Only update **your own*
 
 - `GET /api/session-workdirs` lists existing workdirs referenced by saved Pi session headers (used by the web UI's workdir dropdown; it does not read conversation content).
 - `GET /api/events` is a Server-Sent Events stream of canvas snapshots (used by the web UI).
-- `WS /api/terminal/:id` streams PTY output and accepts raw terminal input and resize messages (used by the web UI). Do not use it for agent-to-agent messaging.
+- `WS /api/terminal/:id` streams PTY output and accepts raw terminal input and resize messages (used by the web UI). Prefer `POST /api/messages` for explicit agent-to-agent messages.
 - `POST /api/agents/:id/stop` terminates a Pi process. `DELETE /api/agents/:id` removes a **stopped** node and its relationships from this canvas, but does not delete its saved Pi session. Don't stop or remove another agent unless explicitly asked.
 - Calls return JSON; failures return `{ "error": "..." }` with a non-2xx HTTP status. `curl -f` treats these as errors.
 - There is **no automatic message passing**, no authentication, and no persistence after server restart. Use the API only against the local server and record relationships only for actual work.

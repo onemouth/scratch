@@ -73,6 +73,23 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), mode: 'resume', task: 'ignored?' })).status, 400);
     const second = (await request('/api/agents', 'POST', { name: 'child', task: 'help', workdir: process.cwd(), parentId: first.id })).data;
     assert.equal(app.snapshot().edges[0].target, second.id);
+    const byId = await request('/api/messages', 'POST', { toId: second.id, fromId: first.id, text: 'Hi\nPlease review' });
+    assert.equal(byId.status, 202);
+    assert.deepEqual(byId.data, { ok: true, targetId: second.id, status: 'written-to-tty' });
+    assert.deepEqual(fakeSpawn.children[3].inputs, [`\x1b[200~Canvas message from agent ${first.id}:\nHi\nPlease review\x1b[201~\r`]);
+    assert.equal((await request('/api/messages', 'POST', { toName: 'Blank session', text: 'hi' })).status, 202);
+    assert.deepEqual(fakeSpawn.children[1].inputs, ['\x1b[200~hi\x1b[201~\r']);
+    assert.equal(app.snapshot().edges.length, 1); // Explicit messaging does not create delegation edges.
+    assert.equal((await request('/api/messages', 'POST', { toId: second.id, toName: 'child', text: 'hi' })).status, 400);
+    assert.equal((await request('/api/messages', 'POST', { toId: second.id, text: 'hi\x1b[201~\r' })).status, 400);
+    assert.equal((await request('/api/messages', 'POST', { toId: second.id, text: '   ' })).status, 400);
+    assert.equal((await request('/api/messages', 'POST', { toId: 'missing', text: 'hi' })).status, 404);
+    assert.equal((await request('/api/messages', 'POST', { toName: 'missing', text: 'hi' })).status, 404);
+    assert.equal((await request('/api/messages', 'POST', { toId: second.id, fromId: 'missing', text: 'hi' })).status, 404);
+    const duplicate = (await request('/api/agents', 'POST', { name: 'child', workdir: process.cwd() })).data;
+    assert.equal((await request('/api/messages', 'POST', { toName: 'child', text: 'hi' })).status, 409);
+    assert.equal((await request(`/api/agents/${duplicate.id}/stop`, 'POST')).status, 200);
+    assert.equal((await request('/api/messages', 'POST', { toId: duplicate.id, text: 'hi' })).status, 409);
     const relationship = app.snapshot().edges[0];
     assert.equal(relationship.type, 'delegates');
     assert.equal(relationship.label, 'delegates');

@@ -1,6 +1,6 @@
 # Agent Canvas
 
-An in-memory infinite canvas for live Pi Coding Agents. Each node contains a real, interactive Pi terminal; a directed connection represents **delegated work**, not automatic message passing.
+An in-memory infinite canvas for live Pi Coding Agents. Each node contains a real, interactive Pi terminal; a directed connection represents **delegated work**, not automatic message passing. Agents can explicitly send messages to a running Pi node via the local API.
 
 ## Quick start
 

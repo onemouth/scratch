@@ -23,7 +23,7 @@ For a manual end-to-end check: choose a saved Pi session folder from the workdir
 ## Source map
 
 - `server/index.js` — in-memory state, validation, Pi PTYs, HTTP/SSE/WebSocket, static production assets, served API guide.
-- `server/index.test.js` — API lifecycle, saved-session workdirs, delegation, terminal I/O and guide URL tests using a fake PTY.
+- `server/index.test.js` — API lifecycle, saved-session workdirs, delegation, explicit TTY messaging, terminal I/O and guide URL tests using a fake PTY.
 - `src/main.jsx` — canvas and terminal browser UI.
 - `src/style.css` — canvas, nodes, terminal and guide styling.
 - `docs/agent-api.md` — single source for the copyable agent-facing API guide (the server substitutes `$AGENT_CANVAS_URL` when serving it).
@@ -31,4 +31,4 @@ For a manual end-to-end check: choose a saved Pi session folder from the workdir
 
 ## Current scope
 
-No database, canvas restart recovery, multi-user access, agent-to-agent message forwarding or workflow scheduler. Pi sessions are saved by Pi and can be picked again with `pi -r`, but Canvas nodes and relationships are not persisted. Keep UI coordinates out of instructions to agents: agents describe work and delegation, while the browser controls spatial layout. See [architecture](architecture.md) and [agent API guide](agent-api.md) for details.
+No database, canvas restart recovery, multi-user access, automatic agent-to-agent message forwarding or workflow scheduler. Explicit messages to existing running nodes use `POST /api/messages` and write to their TTYs; a successful response does not prove the recipient processed the text. Pi sessions are saved by Pi and can be picked again with `pi -r`, but Canvas nodes and relationships are not persisted. Keep UI coordinates out of instructions to agents: agents describe work and delegation, while the browser controls spatial layout. See [architecture](architecture.md) and [agent API guide](agent-api.md) for details.

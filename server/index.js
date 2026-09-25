@@ -81,6 +81,30 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     if (!agent) throw Object.assign(new Error('Agent not found'), { status: 404 });
     return agent;
   };
+  const sendMessage = (body) => {
+    if ((body.toId === undefined) === (body.toName === undefined)) throw new Error('Specify exactly one of toId or toName');
+    let target;
+    if (body.toId !== undefined) {
+      if (!validText(body.toId, 100)) throw new Error('toId must be a non-empty agent ID');
+      target = requireAgent(body.toId);
+    } else {
+      if (!validText(body.toName, 100)) throw new Error('toName must be a non-empty agent name');
+      const matches = [...agents.values()].filter(agent => agent.name === body.toName);
+      if (!matches.length) throw Object.assign(new Error('Agent not found'), { status: 404 });
+      if (matches.length > 1) throw Object.assign(new Error('Agent name is ambiguous; use toId'), { status: 409 });
+      target = matches[0];
+    }
+    if (!validText(body.text, 10000) || /[\x00-\x08\x0b-\x1f\x7f]/.test(body.text)) {
+      throw new Error('text must be 1–10000 characters without terminal control characters');
+    }
+    const sender = body.fromId === undefined ? null : requireAgent(body.fromId);
+    const child = processes.get(target.id);
+    if (target.status !== 'running' || !child) throw Object.assign(new Error('Target agent is not running'), { status: 409 });
+    const text = sender ? `Canvas message from agent ${sender.id}:\n${body.text}` : body.text;
+    // Bracketed paste keeps embedded newlines from acting as Enter keys; the final CR submits the prompt.
+    child.write(`\x1b[200~${text}\x1b[201~\r`);
+    return { ok: true, targetId: target.id, status: 'written-to-tty' };
+  };
   const edgeLabel = (value) => {
     if (typeof value !== 'string' || !validText(value, 120)) throw new Error('label must be 1–120 characters');
     return value.trim();
@@ -114,7 +138,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       width: 440, height: 320,
     };
     const base = `http://127.0.0.1:${port}`;
-    const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The canvas API is at ${base}/api. Use your bash tool with curl to interact with it. GET /api/state reads all agents and delegation relationships. POST /api/agents with JSON {"name":"...","workdir":"absolute path","task":"...","parentId":"${id}"} creates a child agent and a delegation edge. POST /api/edges with {"source":"${id}","target":"agent-id"} records delegation without sending messages. PATCH /api/agents/${id} with {"note":"short progress summary"} updates your note. Relationships represent real delegation; only create them when delegating actual work. Never modify canvas coordinates. This API is local to this server. Read the full guide with curl -fsS ${base}/api/docs when you need examples or details.`;
+    const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The canvas API is at ${base}/api. Use your bash tool with curl to interact with it. GET /api/state reads all agents and delegation relationships. POST /api/agents with JSON {"name":"...","workdir":"absolute path","task":"...","parentId":"${id}"} creates a child agent and a delegation edge. POST /api/edges with {"source":"${id}","target":"agent-id"} records delegation without sending messages. POST /api/messages with {"toId":"agent-id","fromId":"${id}","text":"..."} sends an explicit message to a running agent's Pi TTY; use toName instead of toId only when the name is unique. PATCH /api/agents/${id} with {"note":"short progress summary"} updates your note. Relationships represent real delegation; only create them when delegating actual work. Never modify canvas coordinates. This API is local to this server. Read the full guide with curl -fsS ${base}/api/docs when you need examples or details.`;
     let child;
     try {
       const args = mode === 'resume'
@@ -182,6 +206,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Expected JSON object');
         }
         if (url.pathname === '/api/agents' && req.method === 'POST') return reply(res, 201, createAgent(body));
+        if (url.pathname === '/api/messages' && req.method === 'POST') return reply(res, 202, sendMessage(body));
         if (url.pathname === '/api/edges' && req.method === 'POST') return reply(res, 201, connect(body.source, body.target, body.label));
         const edgeMatch = url.pathname.match(/^\/api\/edges\/([^/]+)$/);
         if (edgeMatch && req.method === 'PATCH') {
