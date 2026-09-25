@@ -14,7 +14,7 @@ Pi agents ───────── curl to localhost /api/* ─────�
 
 - `server/index.js` owns agents, directed edges, active PTYs, terminal socket subscribers and SSE clients. An agent record contains its ID, workdir, task, status, note, layout and a capped raw terminal-output tail. The server broadcasts state snapshots when metadata changes; terminal bytes go over WebSocket independently.
 - `src/main.jsx` uses React Flow for pan, zoom, nodes, resize and connections. Layout changes are sent back to the server with `PATCH /api/agents/:id`. Mouse mode uses right-drag for pan and wheel for zoom; touchpad mode uses scroll for pan and pinch for zoom. These are browser interaction choices, not Agent API concepts.
-- Each new agent runs `pi` in interactive mode inside a `node-pty` process with the requested workdir and initial task. Pi gets `--no-session`, a short appended system prompt explaining the semantic API, and `AGENT_CANVAS_URL` / `AGENT_CANVAS_ID` environment variables. Child agents spawned via the API receive the same integration.
+- An agent runs `pi` in interactive mode inside a `node-pty` process. **New** mode starts in the requested workdir with an initial task; Pi saves its session normally. **Resume** mode runs `pi -r` there, opening Pi's own saved-session picker in the terminal without an initial task. Both receive a short appended system prompt explaining the semantic API and `AGENT_CANVAS_URL` / `AGENT_CANVAS_ID` environment variables. Child agents spawned via the API receive the same integration.
 - `@xterm/xterm` renders PTY output and sends keystrokes to `/api/terminal/:id`; `@xterm/addon-fit` reports terminal column/row changes. Connecting to an existing node replays the server's recent raw output before subscribing to live output.
 - `docs/agent-api.md` is the source for the in-app **API Guide**. `GET /api/docs` serves it as Markdown and replaces the URL in examples with the backend address or, when the browser requests it, its local Vite proxy origin. The guide can be copied into another agent.
 
@@ -22,7 +22,7 @@ Pi agents ───────── curl to localhost /api/* ─────�
 
 An edge `source → target` means the source **delegated work** to the target. Creating a child with `parentId` adds that edge; `POST /api/edges` can record delegation between existing agents. An edge is not a message channel and does not orchestrate execution.
 
-An agent is `running` while its Pi process exists and `stopped` after exit or Stop. A finished Pi task leaves the interactive process available for follow-up prompts. Stopping a process keeps the node, its last output and all relationships until the server exits. The server does not resume sessions or restore canvas state on restart.
+An agent is `running` while its Pi process exists and `stopped` after exit or Stop. A finished Pi task leaves the interactive process available for follow-up prompts. Stopping a process keeps the node, its last output and all relationships until the server exits. Pi saves sessions independently, which can later be chosen via Resume; the server itself does not restore canvas nodes, relationships or terminals after restart.
 
 ## Boundaries
 

@@ -53,14 +53,18 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     return edge;
   };
   const createAgent = (body) => {
-    if (!validText(body.name, 100) || !validText(body.workdir, 2048) || !validText(body.task)) throw new Error('name, workdir, and task are required');
+    const mode = body.mode ?? 'new';
+    if (!['new', 'resume'].includes(mode)) throw new Error('mode must be new or resume');
+    if (!validText(body.name, 100) || !validText(body.workdir, 2048)) throw new Error('name and workdir are required');
+    if (mode === 'new' && !validText(body.task)) throw new Error('task is required for a new session');
+    if (mode === 'resume' && body.task) throw new Error('task cannot be set when resuming a session');
     const workdir = resolve(body.workdir);
     if (!existsSync(workdir) || !statSync(workdir).isDirectory()) throw new Error('workdir must be an existing directory');
     if (body.parentId) requireAgent(body.parentId);
     const id = randomUUID();
     const index = agents.size;
     const agent = {
-      id, name: body.name.trim(), workdir, task: body.task.trim(), status: 'running', output: '',
+      id, name: body.name.trim(), workdir, mode, task: mode === 'new' ? body.task.trim() : '', status: 'running', output: '',
       note: '', x: Number.isFinite(body.x) ? body.x : 100 + (index % 3) * 490,
       y: Number.isFinite(body.y) ? body.y : 100 + Math.floor(index / 3) * 380,
       width: 440, height: 320,
@@ -69,7 +73,10 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The canvas API is at ${base}/api. Use your bash tool with curl to interact with it. GET /api/state reads all agents and delegation relationships. POST /api/agents with JSON {"name":"...","workdir":"absolute path","task":"...","parentId":"${id}"} creates a child agent and a delegation edge. POST /api/edges with {"source":"${id}","target":"agent-id"} records delegation without sending messages. PATCH /api/agents/${id} with {"note":"short progress summary"} updates your note. Relationships represent real delegation; only create them when delegating actual work. Never modify canvas coordinates. This API is local to this server. Read the full guide with curl -fsS ${base}/api/docs when you need examples or details.`;
     let child;
     try {
-      child = spawnAgent('pi', ['--no-session', '--name', agent.name, '--append-system-prompt', instructions, '--', agent.task], {
+      const args = mode === 'resume'
+        ? ['--resume', '--append-system-prompt', instructions]
+        : ['--name', agent.name, '--append-system-prompt', instructions, '--', agent.task];
+      child = spawnAgent('pi', args, {
         cwd: workdir, cols: 50, rows: 16, name: 'xterm-256color',
         env: { ...process.env, TERM: 'xterm-256color', PI_IMAGE_PROTOCOL: 'none', AGENT_CANVAS_URL: base, AGENT_CANVAS_ID: id },
       });

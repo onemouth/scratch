@@ -57,6 +57,10 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .modal-head { display: flex; justify-content: space-between; margin-bottom: 24px; }
 .modal-head small { color: #a5a7fa; font: 10px 'JetBrains Mono', monospace; letter-spacing: .14em; }
 .modal h2 { margin: 7px 0 0; font-size: 22px; }
+.session-mode { display: flex; gap: 4px; padding: 4px; background: #121c2c; border: 1px solid #3b4b64; border-radius: 8px; }
+.session-mode button { flex: 1; padding: 9px; background: transparent; border: 0; border-radius: 5px; color: #a9b8d0; font-size: 12px; }
+.session-mode button.active { color: #11152b; background: #a5a7fa; font-weight: 700; }
+.mode-help { background: #202d40; border: 1px solid #3b4b64; border-radius: 7px; color: #b7c4d9; font-size: 12px; line-height: 1.6; padding: 12px; margin: 16px 0; }
 .modal label { display: block; margin: 15px 0; font-size: 12px; font-weight: 600; color: #b7c4d9; }
 .modal input, .modal textarea { display: block; margin-top: 7px; width: 100%; background: #121c2c; color: #ecf0f9; border: 1px solid #3b4b64; border-radius: 7px; outline: none; padding: 11px; font-size: 12px; resize: vertical; }
 .modal input:focus, .modal textarea:focus { border-color: #a5a7fa; }

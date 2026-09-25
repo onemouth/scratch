@@ -46,6 +46,16 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.equal(first.status, 'running');
     assert.equal(fakeSpawn.children[0].options.cwd, process.cwd());
     assert.deepEqual(fakeSpawn.children[0].args.slice(-2), ['--', 'hello']);
+    assert.ok(!fakeSpawn.children[0].args.includes('--no-session'));
+    assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), mode: 'unknown' })).status, 400);
+    assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), mode: 'new' })).status, 400);
+    const resumed = (await request('/api/agents', 'POST', { name: 'Earlier work', workdir: process.cwd(), mode: 'resume' })).data;
+    assert.equal(resumed.mode, 'resume');
+    assert.equal(resumed.task, '');
+    assert.ok(fakeSpawn.children[1].args.includes('--resume'));
+    assert.ok(!fakeSpawn.children[1].args.includes('--no-session'));
+    assert.ok(!fakeSpawn.children[1].args.includes('--name'));
+    assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), mode: 'resume', task: 'ignored?' })).status, 400);
     const second = (await request('/api/agents', 'POST', { name: 'child', task: 'help', workdir: process.cwd(), parentId: first.id })).data;
     assert.equal(app.snapshot().edges[0].target, second.id);
     fakeSpawn.children[0].emit('data', '\u001b[32mHello\u001b[0m');

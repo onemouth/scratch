@@ -69,7 +69,7 @@ const nodeTypes = { agent: AgentNode };
 function Canvas() {
   const [state, setState] = useState({ agents: [], edges: [] });
   const [nodes, setNodes] = useState([]);
-  const [form, setForm] = useState({ name: '', workdir: '', task: '' });
+  const [form, setForm] = useState({ name: '', workdir: '', task: '', mode: 'new' });
   const [open, setOpen] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
   const [guide, setGuide] = useState('');
@@ -120,7 +120,7 @@ function Canvas() {
     e.preventDefault(); setError('');
     try {
       const position = screenToFlowPosition({ x: innerWidth / 2 - 210, y: innerHeight / 2 - 160 });
-      await api('/agents', 'POST', { ...form, x: position.x, y: position.y });
+      await api('/agents', 'POST', { ...form, task: form.mode === 'new' ? form.task : undefined, x: position.x, y: position.y });
       setForm(f => ({ ...f, name: '', task: '' })); setOpen(false);
     } catch (err) { setError(err.message); }
   };
@@ -145,11 +145,17 @@ function Canvas() {
     </section></div>}
     {open && <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) setOpen(false); }}><form className="modal" onSubmit={create}>
       <div className="modal-head"><div><small>NEW SESSION</small><h2>Launch a Pi agent</h2></div><button type="button" className="icon-btn" onClick={() => setOpen(false)}>×</button></div>
-      <label>Name<input autoFocus required maxLength="100" placeholder="e.g. Researcher" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
+      <div className="session-mode" role="group" aria-label="Pi session mode">
+        <button type="button" className={form.mode === 'new' ? 'active' : ''} aria-pressed={form.mode === 'new'} onClick={() => { setForm({ ...form, mode: 'new' }); setError(''); }}>New session</button>
+        <button type="button" className={form.mode === 'resume' ? 'active' : ''} aria-pressed={form.mode === 'resume'} onClick={() => { setForm({ ...form, mode: 'resume' }); setError(''); }}>Resume · pi -r</button>
+      </div>
+      <label>Node name<input autoFocus required maxLength="100" placeholder="e.g. Researcher" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
       <label>Working directory<input required placeholder="/absolute/path/to/project" value={form.workdir} onChange={e => setForm({ ...form, workdir: e.target.value })} /></label>
-      <label>First task<textarea required rows="5" placeholder="What should this agent work on?" value={form.task} onChange={e => setForm({ ...form, task: e.target.value })} /></label>
+      {form.mode === 'new'
+        ? <label>First task<textarea required rows="5" placeholder="What should this agent work on?" value={form.task} onChange={e => setForm({ ...form, task: e.target.value })} /></label>
+        : <p className="mode-help">Pi will open its session picker for this working directory inside the terminal. Choose a saved session there; no initial task is sent.</p>}
       {error && <div className="node-error">{error}</div>}
-      <div className="modal-actions"><button type="button" onClick={() => setOpen(false)}>Cancel</button><button className="primary" type="submit">Launch agent →</button></div>
+      <div className="modal-actions"><button type="button" onClick={() => setOpen(false)}>Cancel</button><button className="primary" type="submit">{form.mode === 'resume' ? 'Open session picker →' : 'Launch agent →'}</button></div>
     </form></div>}
   </div>;
 }

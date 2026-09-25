@@ -26,7 +26,7 @@ curl -fsS -X POST "$AGENT_CANVAS_URL/api/agents" \
   -d '{"name":"Researcher","workdir":"/absolute/path/to/project","task":"Investigate the parser and report findings","parentId":"<YOUR_AGENT_ID>"}'
 ```
 
-Required: `name` (max 100 chars), `workdir` (existing directory; use an absolute path), `task` (initial instruction). Optional: `parentId`, the ID of the delegating agent. Supplying `parentId` **automatically creates a directed `delegates` edge** from parent to child. The response contains the new agent's ID. Omit `parentId` to create an independent agent. Each agent has its own Pi process; both can work in the same directory, so coordinate edits to avoid conflicts.
+Required: `name` (max 100 chars), `workdir` (existing directory; use an absolute path), and `task` (initial instruction) for a new session. Optional: `parentId`, the ID of the delegating agent. Supplying `parentId` **automatically creates a directed `delegates` edge** from parent to child. The response contains the new agent's ID. Omit `parentId` to create an independent agent. Each agent has its own Pi process; both can work in the same directory, so coordinate edits to avoid conflicts. New Pi sessions are saved by Pi, but the Canvas layout is not persisted.
 
 When launched by the Canvas, substitute your ID by constructing the JSON safely (for example with `jq`):
 
@@ -35,6 +35,18 @@ jq -n --arg name 'Researcher' --arg dir "$PWD" --arg task 'Investigate the parse
   '{name:$name,workdir:$dir,task:$task,parentId:$parent}' |
   curl -fsS -X POST "$AGENT_CANVAS_URL/api/agents" -H 'Content-Type: application/json' --data-binary @-
 ```
+
+## Open Pi's saved-session picker (optional)
+
+If you want to continue a session previously saved by Pi in this workdir, create a node with `"mode":"resume"` **instead of** an initial task. This runs `pi -r` in that node's terminal, where a human selects the session; it does not automatically choose one. Do not use this for an unattended delegated task that needs to start immediately.
+
+```sh
+curl -fsS -X POST "$AGENT_CANVAS_URL/api/agents" \
+  -H 'Content-Type: application/json' \
+  -d '{"name":"Previous work","workdir":"/absolute/path/to/project","mode":"resume"}'
+```
+
+`mode` defaults to `"new"`; for `"resume"`, omit `task`. The new Canvas node has its own ID even though its Pi session is resumed. You can include `parentId` only when this is an actual delegation.
 
 ## Record or remove a delegation
 
