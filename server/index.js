@@ -1,38 +1,24 @@
 import http from 'node:http';
-import { spawn } from 'node:child_process';
+import pty from 'node-pty';
+import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
 import { existsSync, statSync, createReadStream } from 'node:fs';
 import { resolve, join, extname } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { StringDecoder } from 'node:string_decoder';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const dist = join(root, 'dist');
 const MAX_OUTPUT = 80000;
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 
-function jsonl(stream, handle) {
-  const decoder = new StringDecoder('utf8');
-  let buffer = '';
-  const parse = (line) => { if (line.trim()) { try { handle(JSON.parse(line)); } catch { /* ignore malformed RPC records */ } } };
-  stream.on('data', (chunk) => {
-    buffer += decoder.write(chunk);
-    let i;
-    while ((i = buffer.indexOf('\n')) !== -1) {
-      parse(buffer.slice(0, i).replace(/\r$/, ''));
-      buffer = buffer.slice(i + 1);
-    }
-  });
-  stream.on('end', () => { buffer += decoder.end(); parse(buffer); });
-}
-
-export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = spawn } = {}) {
+export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = pty.spawn } = {}) {
   const agents = new Map();
   const processes = new Map();
   const edges = new Map();
   const clients = new Set();
+  const terminals = new Map();
+  const wss = new WebSocketServer({ noServer: true });
   let pending = false;
-  let server;
   const snapshot = () => ({ agents: [...agents.values()], edges: [...edges.values()] });
   const broadcast = () => {
     if (pending) return;
@@ -45,11 +31,9 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   };
   const output = (agent, text) => {
     agent.output = (agent.output + text).slice(-MAX_OUTPUT);
-    broadcast();
-  };
-  const send = (child, command) => {
-    if (!child?.stdin?.writable) throw new Error('Agent process is not available');
-    child.stdin.write(`${JSON.stringify(command)}\n`);
+    for (const socket of terminals.get(agent.id) || []) {
+      if (socket.readyState === WebSocket.OPEN) socket.send(text);
+    }
   };
   const validText = (x, max = 10000) => typeof x === 'string' && x.trim().length > 0 && x.length <= max;
   const requireAgent = (id) => {
@@ -75,7 +59,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     const id = randomUUID();
     const index = agents.size;
     const agent = {
-      id, name: body.name.trim(), workdir, task: body.task.trim(), status: 'starting', output: '',
+      id, name: body.name.trim(), workdir, task: body.task.trim(), status: 'running', output: '',
       note: '', x: Number.isFinite(body.x) ? body.x : 100 + (index % 3) * 490,
       y: Number.isFinite(body.y) ? body.y : 100 + Math.floor(index / 3) * 380,
       width: 440, height: 320,
@@ -84,41 +68,21 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The canvas API is at ${base}/api. Use your bash tool with curl to interact with it. GET /api/state reads all agents and delegation relationships. POST /api/agents with JSON {"name":"...","workdir":"absolute path","task":"...","parentId":"${id}"} creates a child agent and a delegation edge. POST /api/edges with {"source":"${id}","target":"agent-id"} records delegation without sending messages. PATCH /api/agents/${id} with {"note":"short progress summary"} updates your note. Relationships represent real delegation; only create them when delegating actual work. Never modify canvas coordinates. This API is local to this server.`;
     let child;
     try {
-      child = spawnAgent('pi', ['--mode', 'rpc', '--no-session', '--name', agent.name, '--append-system-prompt', instructions], {
-        cwd: workdir, stdio: ['pipe', 'pipe', 'pipe'],
-        env: { ...process.env, AGENT_CANVAS_URL: base, AGENT_CANVAS_ID: id },
+      child = spawnAgent('pi', ['--no-session', '--name', agent.name, '--append-system-prompt', instructions, '--', agent.task], {
+        cwd: workdir, cols: 50, rows: 16, name: 'xterm-256color',
+        env: { ...process.env, TERM: 'xterm-256color', PI_IMAGE_PROTOCOL: 'none', AGENT_CANVAS_URL: base, AGENT_CANVAS_ID: id },
       });
     } catch (error) { throw Object.assign(new Error(`Could not start pi: ${error.message}`), { status: 500 }); }
     agents.set(id, agent);
     processes.set(id, child);
     if (body.parentId) connect(body.parentId, id);
-    output(agent, `> ${agent.task}\n\n`);
-    child.on('error', (error) => { output(agent, `\n[process error] ${error.message}\n`); agent.status = 'stopped'; broadcast(); });
-    child.on('exit', (code, signal) => {
+    child.onData((data) => output(agent, data));
+    child.onExit(({ exitCode, signal }) => {
       processes.delete(id);
       agent.status = 'stopped';
-      output(agent, `\n[process exited${signal ? `: ${signal}` : `: ${code}`} ]\n`);
-    });
-    child.stderr.on('data', (chunk) => output(agent, `\n[pi] ${chunk.toString()}`));
-    jsonl(child.stdout, (event) => {
-      if (event.type === 'agent_start') agent.status = 'working';
-      if (event.type === 'agent_settled') { agent.status = 'idle'; output(agent, '\n'); }
-      if (event.type === 'message_update' && event.assistantMessageEvent?.type === 'text_delta') output(agent, event.assistantMessageEvent.delta);
-      if (event.type === 'tool_execution_start') output(agent, `\n$ ${event.toolName}${event.args?.command ? ` ${event.args.command}` : ''}\n`);
-      if (event.type === 'tool_execution_end') {
-        const text = event.result?.content?.filter((c) => c.type === 'text').map((c) => c.text).join('\n');
-        if (text) output(agent, `${text.slice(0, 5000)}\n`);
-      }
-      if (event.type === 'response' && !event.success) output(agent, `\n[error] ${event.error}\n`);
-      if (event.type === 'extension_ui_request' && ['select', 'confirm', 'input', 'editor'].includes(event.method)) {
-        // MVP has no modal bridge: cancel rather than leave the agent blocked indefinitely.
-        send(child, { type: 'extension_ui_response', id: event.id, cancelled: true });
-        output(agent, `\n[unsupported dialog: ${event.method}]\n`);
-      }
+      output(agent, `\r\n[Pi exited: ${signal ? `signal ${signal}` : `code ${exitCode}`}]\r\n`);
       broadcast();
     });
-    try { send(child, { type: 'prompt', message: agent.task }); }
-    catch { /* child error/exit handlers will update status */ }
     broadcast();
     return agent;
   };
@@ -127,11 +91,10 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(value));
   };
+  const allowedOrigin = (origin) => !origin || [`http://127.0.0.1:${port}`, 'http://127.0.0.1:5173'].includes(origin);
   const handler = async (req, res) => {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
-    if (req.headers.origin && ![`http://127.0.0.1:${port}`, 'http://127.0.0.1:5173'].includes(req.headers.origin)) {
-      return reply(res, 403, { error: 'Cross-origin requests are not allowed' });
-    }
+    if (!allowedOrigin(req.headers.origin)) return reply(res, 403, { error: 'Cross-origin requests are not allowed' });
     if (url.pathname === '/api/events' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       res.write(`data: ${JSON.stringify(snapshot())}\n\n`);
@@ -159,24 +122,11 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           if (!edges.delete(edgeMatch[1])) return reply(res, 404, { error: 'Edge not found' });
           broadcast(); return reply(res, 200, { ok: true });
         }
-        const match = url.pathname.match(/^\/api\/agents\/([^/]+)(?:\/(prompt|stop|abort))?$/);
+        const match = url.pathname.match(/^\/api\/agents\/([^/]+)(?:\/(stop))?$/);
         if (match) {
           const agent = requireAgent(match[1]);
-          if (match[2] === 'prompt' && req.method === 'POST') {
-            if (!validText(body.message)) throw new Error('message is required');
-            if (agent.status === 'stopped') throw new Error('Agent is stopped');
-            send(processes.get(agent.id), { type: 'prompt', message: body.message.trim(), streamingBehavior: 'followUp' });
-            output(agent, `\n> ${body.message.trim()}\n`);
-            return reply(res, 200, { ok: true });
-          }
-          if (match[2] === 'abort' && req.method === 'POST') {
-            if (agent.status === 'stopped') throw new Error('Agent is stopped');
-            send(processes.get(agent.id), { type: 'clear_queue' });
-            send(processes.get(agent.id), { type: 'abort' });
-            return reply(res, 200, { ok: true });
-          }
           if (match[2] === 'stop' && req.method === 'POST') {
-            processes.get(agent.id)?.kill('SIGTERM');
+            processes.get(agent.id)?.kill();
             agent.status = 'stopped'; broadcast();
             return reply(res, 200, { ok: true });
           }
@@ -200,19 +150,43 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       }
     }
     if (req.method !== 'GET') return reply(res, 405, { error: 'Method not allowed' });
-    // Serve production build only; Vite handles assets during development.
     const file = resolve(dist, `.${url.pathname === '/' ? '/index.html' : url.pathname}`);
     if (!file.startsWith(dist + '/') || !existsSync(file) || !statSync(file).isFile()) return reply(res, 404, { error: 'Run npm run build or npm run dev' });
     res.writeHead(200, { 'Content-Type': mime[extname(file)] || 'application/octet-stream' });
     createReadStream(file).pipe(res);
   };
-  server = http.createServer((req, res) => { handler(req, res).catch((error) => reply(res, 500, { error: error.message })); });
+  const server = http.createServer((req, res) => { handler(req, res).catch((error) => reply(res, 500, { error: error.message })); });
+  server.on('upgrade', (req, socket, head) => {
+    const match = req.url?.match(/^\/api\/terminal\/([^/?]+)$/);
+    if (!match || !allowedOrigin(req.headers.origin) || !agents.has(match[1])) { socket.destroy(); return; }
+    const id = match[1];
+    wss.handleUpgrade(req, socket, head, (ws) => {
+      if (!terminals.has(id)) terminals.set(id, new Set());
+      const group = terminals.get(id);
+      // Replay before subscribing to live output, avoiding duplicate chunks.
+      if (agents.get(id).output) ws.send(agents.get(id).output);
+      group.add(ws);
+      ws.on('message', (bytes) => {
+        let message;
+        try { message = JSON.parse(bytes.toString()); } catch { return; }
+        const child = processes.get(id);
+        if (!child) return;
+        if (message.type === 'input' && typeof message.data === 'string' && message.data.length <= 65536) child.write(message.data);
+        if (message.type === 'resize' && Number.isInteger(message.cols) && Number.isInteger(message.rows) && message.cols >= 2 && message.cols <= 500 && message.rows >= 2 && message.rows <= 200) {
+          try { child.resize(message.cols, message.rows); } catch { /* process already exited */ }
+        }
+      });
+      ws.on('close', () => { group.delete(ws); if (!group.size) terminals.delete(id); });
+    });
+  });
   return {
     server, snapshot,
     listen: () => new Promise((resolveListen) => server.listen(port, '127.0.0.1', resolveListen)),
     close: () => new Promise((resolveClose) => {
       for (const client of clients) client.end();
-      for (const child of processes.values()) child.kill('SIGTERM');
+      for (const group of terminals.values()) for (const ws of group) ws.terminate();
+      wss.close();
+      for (const child of processes.values()) child.kill();
       server.close(resolveClose);
     }),
   };

@@ -2,6 +2,9 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ReactFlow, Background, Controls, Handle, MiniMap, NodeResizer, Position, applyNodeChanges, useReactFlow, ReactFlowProvider } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { Terminal } from '@xterm/xterm';
+import { FitAddon } from '@xterm/addon-fit';
+import '@xterm/xterm/css/xterm.css';
 import './style.css';
 
 async function api(path, method = 'GET', body) {
@@ -11,40 +14,51 @@ async function api(path, method = 'GET', body) {
   return result;
 }
 
+function PtyTerminal({ id, stopped }) {
+  const container = React.useRef(null);
+  const termRef = React.useRef(null);
+  useEffect(() => {
+    const terminal = new Terminal({ cursorBlink: true, fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 11, lineHeight: 1.25, theme: { background: '#101927', foreground: '#d1dcec', cursor: '#a5a7fa' }, scrollback: 3000, allowProposedApi: false });
+    const fit = new FitAddon();
+    terminal.loadAddon(fit);
+    terminal.open(container.current);
+    termRef.current = terminal;
+    let socket;
+    let retry;
+    let alive = true;
+    const send = (value) => { if (socket?.readyState === WebSocket.OPEN) socket.send(JSON.stringify(value)); };
+    const resize = () => { if (container.current?.clientWidth && container.current?.clientHeight) { fit.fit(); send({ type: 'resize', cols: terminal.cols, rows: terminal.rows }); } };
+    const observer = new ResizeObserver(resize);
+    observer.observe(container.current);
+    const input = terminal.onData(data => send({ type: 'input', data }));
+    const connect = () => {
+      socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal/${id}`);
+      socket.onopen = () => { terminal.reset(); resize(); };
+      socket.onmessage = event => terminal.write(event.data);
+      socket.onclose = () => { if (alive) retry = setTimeout(connect, 1500); };
+    };
+    connect();
+    return () => { alive = false; clearTimeout(retry); socket?.close(); observer.disconnect(); input.dispose(); terminal.dispose(); termRef.current = null; };
+  }, [id]);
+  useEffect(() => { if (stopped) termRef.current?.blur(); }, [stopped]);
+  return <div className="terminal nodrag nowheel" ref={container} onMouseDown={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()} />;
+}
+
 function AgentNode({ id, data, selected }) {
   const agent = data.agent;
-  const [message, setMessage] = useState('');
   const [error, setError] = useState('');
-  const outputRef = React.useRef(null);
-  useEffect(() => { if (outputRef.current) outputRef.current.scrollTop = outputRef.current.scrollHeight; }, [agent.output]);
-  const act = async (path, body) => {
-    setError('');
-    try { await api(`/agents/${id}/${path}`, 'POST', body); } catch (e) { setError(e.message); }
-  };
-  const send = async (e) => {
-    e.preventDefault();
-    if (!message.trim()) return;
-    await act('prompt', { message });
-    setMessage('');
-  };
+  const stop = async () => { try { await api(`/agents/${id}/stop`, 'POST'); } catch (e) { setError(e.message); } };
   return <div className={`agent-node ${agent.status}`}>
     <NodeResizer isVisible={selected} minWidth={320} minHeight={240} onResizeEnd={(_, p) => api(`/agents/${id}`, 'PATCH', { width: p.width, height: p.height }).catch(console.error)} />
     <Handle type="target" position={Position.Left} />
     <header className="node-header">
       <span className="status-dot" /><strong title={agent.name}>{agent.name}</strong><span className="badge">{agent.status}</span>
-      {agent.status !== 'stopped' && <button className="icon-btn nodrag" title="Stop agent" onClick={() => act('stop')}>■</button>}
+      {agent.status !== 'stopped' && <button className="icon-btn nodrag" title="Stop agent" onClick={stop}>■</button>}
     </header>
     <div className="node-subtitle" title={agent.workdir}>{agent.workdir}</div>
     {agent.note && <div className="node-note" title={agent.note}>{agent.note}</div>}
-    <pre className="terminal nodrag nowheel" ref={outputRef}>{agent.output || 'Starting Pi…'}</pre>
+    <PtyTerminal id={id} stopped={agent.status === 'stopped'} />
     {error && <div className="node-error">{error}</div>}
-    <form className="prompt nodrag" onSubmit={send}>
-      <textarea className="nowheel" rows="2" placeholder={agent.status === 'stopped' ? 'Agent stopped' : 'Message agent… (Enter to send)'} value={message} disabled={agent.status === 'stopped'} onChange={e => setMessage(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); e.currentTarget.form.requestSubmit(); } }} />
-      <div className="prompt-actions">
-        {agent.status === 'working' && <button type="button" onClick={() => act('abort')}>Abort</button>}
-        <button type="submit" disabled={agent.status === 'stopped' || !message.trim()}>Send ↵</button>
-      </div>
-    </form>
     <Handle type="source" position={Position.Right} />
   </div>;
 }
@@ -94,7 +108,7 @@ function Canvas() {
   return <div className="app">
     <div className="topbar"><div className="brand"><span className="brand-icon">✳</span> Agent Canvas <small>PI WORKSPACE</small></div><div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="primary" onClick={() => { setError(''); setOpen(true); }}>＋ New agent</button></div></div>
     <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
-      <Background color="#243148" gap={24} size={1} /><Controls /><MiniMap pannable zoomable nodeColor={n => n.data.agent.status === 'working' ? '#9dd9ad' : '#526582'} />
+      <Background color="#243148" gap={24} size={1} /><Controls /><MiniMap pannable zoomable nodeColor={n => n.data.agent.status === 'running' ? '#9dd9ad' : '#526582'} />
       {state.agents.length === 0 && <div className="empty"><div className="empty-icon">✳</div><h1>Space for your agents.</h1><p>Start a Pi agent, then connect agents to map real delegation.</p><button className="primary" onClick={() => setOpen(true)}>＋ Create your first agent</button><span>Drag canvas to pan · Scroll to zoom</span></div>}
     </ReactFlow>
     <div className="hint">Drag nodes · Resize selected nodes · Connect handles to delegate · Click edge to remove</div>
