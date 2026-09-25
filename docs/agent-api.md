@@ -16,7 +16,7 @@ You can use the Agent Canvas API to observe the shared canvas, create Pi agents,
 curl -fsS "$AGENT_CANVAS_URL/api/state"
 ```
 
-Returns `{ "agents": [...], "edges": [...] }`. Agents have `id`, `name`, `workdir`, `task`, `status` (`running` or `stopped`), `note`, recent raw terminal `output`, and layout fields. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
+Returns `{ "agents": [...], "edges": [...], "notes": [...] }`. Agents have `id`, `name`, `workdir`, `task`, `status` (`running` or `stopped`), `note`, recent raw terminal `output`, and layout fields. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
 
 ## Delegate work to a new Pi agent
 
@@ -102,6 +102,10 @@ curl -fsS -X PATCH "$AGENT_CANVAS_URL/api/agents/$AGENT_CANVAS_ID" \
 ```
 
 Notes are at most 500 characters and appear on the node. Only update **your own** note. Layout fields (`x`, `y`, `width`, `height`) are for the human UI; agents should not change coordinates or rendering.
+
+## Canvas sticky notes
+
+Sticky notes are independent text nodes, not agents or delegation targets. `POST /api/notes` creates one with optional `title` (1–100 characters, trimmed, defaults to `Note`) and `text` (up to 10,000 characters, empty allowed). `PATCH /api/notes/:id` updates its `title` or `text`; `DELETE /api/notes/:id` removes it. State includes `notes` with `id`, `title`, `text`, and layout fields. Layout fields (`x`, `y`, `width`, `height`; minimum size 160) are for the human UI. Notes exist only until server restart. Only edit or remove a user's notes when asked.
 
 ## Other interfaces and boundaries
 

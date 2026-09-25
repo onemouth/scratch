@@ -81,7 +81,33 @@ function AgentNode({ id, data, selected }) {
   </div>;
 }
 
-const nodeTypes = { agent: AgentNode };
+function StickyNote({ id, data, selected }) {
+  const [editingTitle, setEditingTitle] = useState(false);
+  const [title, setTitle] = useState('');
+  const cancelTitle = React.useRef(false);
+  const saveTitle = async () => {
+    setEditingTitle(false);
+    if (cancelTitle.current) { cancelTitle.current = false; return; }
+    try { await api(`/notes/${id}`, 'PATCH', { title: title.trim() || 'Note' }); setError(''); }
+    catch (e) { setError(e.message); }
+  };
+  const [text, setText] = useState(data.note.text);
+  const [error, setError] = useState('');
+  const dirty = React.useRef(false);
+  useEffect(() => { if (!dirty.current) setText(data.note.text); }, [data.note.text]);
+  const save = async () => {
+    if (!dirty.current) return;
+    try { await api(`/notes/${id}`, 'PATCH', { text }); dirty.current = false; setError(''); }
+    catch (e) { setError(e.message); }
+  };
+  return <div className="sticky-note">
+    <NodeResizer isVisible={selected} minWidth={160} minHeight={160} onResizeEnd={(_, p) => api(`/notes/${id}`, 'PATCH', { width: p.width, height: p.height }).catch(e => setError(e.message))} />
+    <header>{editingTitle ? <input className="note-title-input nodrag" aria-label="Note title" value={title} maxLength={100} autoFocus onFocus={e => e.target.select()} onChange={e => setTitle(e.target.value)} onBlur={saveTitle} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } if (e.key === 'Escape') { cancelTitle.current = true; e.currentTarget.blur(); } }} /> : <button className="note-title nodrag" title="Edit note title" onClick={() => { setTitle(data.note.title || 'Note'); setEditingTitle(true); }}>{data.note.title || 'Note'}</button>}<button className="icon-btn nodrag" aria-label="Delete note" onClick={() => api(`/notes/${id}`, 'DELETE').catch(e => setError(e.message))}>×</button></header>
+    <textarea className="nodrag nowheel" aria-label="Note text" placeholder="Write a note…" maxLength={10000} value={text} onChange={e => { dirty.current = true; setText(e.target.value); }} onBlur={save} />
+    {error && <div role="alert">{error}<button className="nodrag" onClick={save}>Retry save</button></div>}
+  </div>;
+}
+const nodeTypes = { agent: AgentNode, note: StickyNote };
 
 function DelegationEdge({ id, sourceX, sourceY, targetX, targetY, sourcePosition, targetPosition, markerEnd, data }) {
   const [editing, setEditing] = useState(false);
@@ -158,20 +184,27 @@ function Canvas() {
   useEffect(() => {
     setNodes(previous => {
       const byId = new Map(previous.map(n => [n.id, n]));
-      return state.agents.map(agent => {
+      return [...state.agents.map(agent => {
         const old = byId.get(agent.id);
         return {
           id: agent.id, type: 'agent', position: old?.dragging ? old.position : { x: agent.x, y: agent.y },
           style: { width: agent.width, height: agent.height }, data: { agent }, selected: old?.selected,
         };
-      });
+      }), ...(state.notes || []).map(note => {
+        const old = byId.get(note.id);
+        return { id: note.id, type: 'note', position: old?.dragging ? old.position : { x: note.x, y: note.y }, style: { width: note.width, height: note.height }, data: { note }, selected: old?.selected };
+      })];
     });
-  }, [state.agents]);
+  }, [state.agents, state.notes]);
   const onNodesChange = useCallback(changes => setNodes(ns => applyNodeChanges(changes, ns)), []);
-  const onNodeDragStop = useCallback((_, node) => { api(`/agents/${node.id}`, 'PATCH', { x: node.position.x, y: node.position.y }).catch(console.error); }, []);
+  const onNodeDragStop = useCallback((_, node) => { api(`/${node.type === 'note' ? 'notes' : 'agents'}/${node.id}`, 'PATCH', { x: node.position.x, y: node.position.y }).catch(console.error); }, []);
   const onConnect = useCallback(async ({ source, target }) => { try { await api('/edges', 'POST', { source, target }); } catch (e) { setError(e.message); } }, []);
   const edges = useMemo(() => state.edges.map(edge => ({ ...edge, data: { label: edge.label || 'delegates', onError: setError }, markerEnd: { type: 'arrowclosed', color: '#8aa3e8' } })), [state.edges]);
   const openLaunch = () => { setError(''); setOpen(true); };
+  const createNote = async () => {
+    const position = screenToFlowPosition({ x: innerWidth / 2 - 140, y: innerHeight / 2 - 110 });
+    try { await api('/notes', 'POST', position); } catch (e) { setError(e.message); }
+  };
   const create = async (e) => {
     e.preventDefault(); setError('');
     try {
@@ -181,11 +214,11 @@ function Canvas() {
     } catch (err) { setError(err.message); }
   };
   return <div className="app">
-    <div className="topbar"><div className="brand"><span className="brand-icon">✳</span> Agent Canvas <small>PI WORKSPACE</small></div><div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="primary" onClick={openLaunch}>＋ New agent</button></div></div>
+    <div className="topbar"><div className="brand"><span className="brand-icon">✳</span> Agent Canvas <small>PI WORKSPACE</small></div><div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></div></div>
     <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={pointerMode === 'mouse' ? [2] : true} panOnScroll={pointerMode === 'touchpad'} zoomOnScroll={pointerMode === 'mouse'} zoomOnPinch zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
-      <Background color="#243148" gap={24} size={1} /><Controls /><MiniMap pannable zoomable nodeColor={n => n.data.agent.status === 'running' ? '#9dd9ad' : '#526582'} />
+      <Background color="#243148" gap={24} size={1} /><Controls /><MiniMap pannable zoomable nodeColor={n => n.type === 'note' ? '#f4d77b' : n.data.agent.status === 'running' ? '#9dd9ad' : '#526582'} />
     </ReactFlow>
-    {state.agents.length === 0 && <div className="empty"><div className="empty-icon">✳</div><h1>Space for your agents.</h1><p>Start a Pi agent, then connect agents to map real delegation.</p><button type="button" className="primary" onClick={openLaunch}>＋ Create your first agent</button><span>{pointerMode === 'mouse' ? 'Right-drag canvas to pan · Wheel to zoom' : 'Drag or two-finger scroll to pan · Pinch to zoom'}</span></div>}
+    {state.agents.length === 0 && !(state.notes || []).length && <div className="empty"><div className="empty-icon">✳</div><h1>Space for your agents.</h1><p>Start a Pi agent, then connect agents to map real delegation.</p><button type="button" className="primary" onClick={openLaunch}>＋ Create your first agent</button><span>{pointerMode === 'mouse' ? 'Right-drag canvas to pan · Wheel to zoom' : 'Drag or two-finger scroll to pan · Pinch to zoom'}</span></div>}
     <div className="hint">Drag nodes · Resize selected nodes · Connect handles to delegate · Click label to edit · Click edge to remove</div>
     <div className="pointer-mode" role="group" aria-label="Canvas pointer mode">
       <button type="button" className={pointerMode === 'mouse' ? 'active' : ''} aria-pressed={pointerMode === 'mouse'} onClick={() => setPointerMode('mouse')} title="Right-drag to pan · Wheel to zoom">Mouse</button>

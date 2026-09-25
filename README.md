@@ -15,6 +15,8 @@ Open **http://127.0.0.1:5173**. Enter an existing working directory's absolute p
 
 Use the bottom-right toggle: **Mouse** uses right-drag to pan and the wheel to zoom; **Touchpad** uses two-finger scroll to pan and pinch to zoom. Drag nodes by their headers, resize selected nodes, and connect right-to-left handles to record delegation. Click a connection's label to edit its display text; the underlying relationship remains a delegation.
 
+Use **＋ Note** to add a yellow sticky note. Click its title to rename it (Enter/blur saves, Escape cancels; blank resets to Note). Drag the header's empty area, resize it when selected, and edit its text directly (saved when the editor loses focus). Click **×** to delete it. Notes are independent of agents and disappear when the server restarts.
+
 ## Documentation
 
 - [Architecture](docs/architecture.md) — processes, canvas state, PTY streaming, lifecycle and boundaries.

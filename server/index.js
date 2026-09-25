@@ -55,11 +55,12 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   const agents = new Map();
   const processes = new Map();
   const edges = new Map();
+  const notes = new Map();
   const clients = new Set();
   const terminals = new Map();
   const wss = new WebSocketServer({ noServer: true });
   let pending = false;
-  const snapshot = () => ({ agents: [...agents.values()], edges: [...edges.values()] });
+  const snapshot = () => ({ agents: [...agents.values()], edges: [...edges.values()], notes: [...notes.values()] });
   const broadcast = () => {
     if (pending) return;
     pending = true;
@@ -207,6 +208,30 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
         }
         if (url.pathname === '/api/agents' && req.method === 'POST') return reply(res, 201, createAgent(body));
         if (url.pathname === '/api/messages' && req.method === 'POST') return reply(res, 202, sendMessage(body));
+        const noteMatch = url.pathname.match(/^\/api\/notes\/([^/]+)$/);
+        if ((url.pathname === '/api/notes' && req.method === 'POST') || (noteMatch && ['PATCH', 'DELETE'].includes(req.method))) {
+          const existing = noteMatch ? notes.get(noteMatch[1]) : null;
+          if (noteMatch && !existing) return reply(res, 404, { error: 'Note not found' });
+          if (req.method === 'DELETE') {
+            notes.delete(existing.id); broadcast(); return reply(res, 200, { ok: true });
+          }
+          const updated = { ...(existing || { id: randomUUID(), title: 'Note', text: '', x: 0, y: 0, width: 280, height: 220 }) };
+          if (body.title !== undefined) {
+            if (!validText(body.title, 100)) throw new Error('title must be 1–100 characters');
+            updated.title = body.title.trim();
+          }
+          if (body.text !== undefined) {
+            if (typeof body.text !== 'string' || body.text.length > 10000) throw new Error('text must be at most 10000 characters');
+            updated.text = body.text;
+          }
+          for (const key of ['x', 'y', 'width', 'height']) {
+            if (body[key] === undefined) continue;
+            if (!Number.isFinite(body[key]) || (['width', 'height'].includes(key) && body[key] < 160)) throw new Error(`Invalid ${key}`);
+            updated[key] = body[key];
+          }
+          notes.set(updated.id, updated); broadcast();
+          return reply(res, existing ? 200 : 201, updated);
+        }
         if (url.pathname === '/api/edges' && req.method === 'POST') return reply(res, 201, connect(body.source, body.target, body.label));
         const edgeMatch = url.pathname.match(/^\/api\/edges\/([^/]+)$/);
         if (edgeMatch && req.method === 'PATCH') {

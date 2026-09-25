@@ -50,6 +50,25 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.ok((await browserGuide.text()).includes('curl -fsS "http://127.0.0.1:5173/api/state"'));
     const spoofedGuide = await fetch(base + '/api/docs?origin=https%3A%2F%2Funtrusted.example');
     assert.ok((await spoofedGuide.text()).includes(`curl -fsS "${base}/api/state"`));
+    const createdNote = await request('/api/notes', 'POST', { text: 'Plan\nReview', x: 20, y: 30 });
+    assert.equal(createdNote.status, 201);
+    const noteId = createdNote.data.id;
+    assert.equal(createdNote.data.title, 'Note');
+    assert.equal((await request(`/api/notes/${noteId}`, 'PATCH', { title: ' Release plan ' })).data.title, 'Release plan');
+    for (const title of ['', '   ', null, 123, 'x'.repeat(101)]) {
+      assert.equal((await request(`/api/notes/${noteId}`, 'PATCH', { title })).status, 400);
+    }
+    assert.equal(app.snapshot().notes[0].title, 'Release plan');
+    assert.equal(app.snapshot().notes[0].text, 'Plan\nReview');
+    assert.equal((await request(`/api/notes/${noteId}`, 'PATCH', { text: '', width: 320, height: 240, x: 80 })).status, 200);
+    assert.equal(app.snapshot().notes[0].width, 320);
+    assert.equal(app.snapshot().notes[0].text, '');
+    assert.equal((await request(`/api/notes/${noteId}`, 'PATCH', { text: 'invalid update', width: 1 })).status, 400);
+    assert.equal(app.snapshot().notes[0].text, '');
+    assert.equal((await request('/api/notes', 'POST', { text: 'x'.repeat(10001) })).status, 400);
+    assert.equal((await request(`/api/notes/${noteId}`, 'DELETE')).status, 200);
+    assert.equal(app.snapshot().notes.length, 0);
+    assert.equal((await request(`/api/notes/${noteId}`, 'PATCH', { text: 'gone' })).status, 404);
     const { data: saved } = await request('/api/session-workdirs');
     assert.deepEqual(saved.workdirs.map(({ path, sessionCount }) => ({ path, sessionCount })), [{ path: process.cwd(), sessionCount: 2 }]);
     assert.equal((await request('/api/agents', 'POST', { name: 'test', task: 'hi', workdir: '/definitely/missing' })).status, 400);

@@ -2,6 +2,15 @@
 :root { font-family: 'DM Sans', system-ui, sans-serif; color: #e7edfa; background: #101724; font-synthesis: none; }
 * { box-sizing: border-box; }
 body { margin: 0; }
+.sticky-note { width: 100%; height: 100%; display: flex; flex-direction: column; background: #f7e4a0; color: #493b1d; border: 1px solid #cdb468; border-radius: 8px; box-shadow: 0 6px 20px #0003; overflow: hidden; }
+.sticky-note header { display: flex; align-items: center; justify-content: space-between; padding: 6px 12px; background: #efd382; cursor: grab; }
+.sticky-note header .icon-btn { color: #493b1d; flex-shrink: 0; }
+.sticky-note .note-title, .sticky-note .note-title-input { min-width: 0; max-width: calc(100% - 48px); font-weight: 600; color: inherit; background: transparent; padding: 2px 4px; }
+.sticky-note .note-title { border: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; cursor: text; }
+.sticky-note .note-title-input { width: calc(100% - 48px); border: 1px solid #aa8b3d; border-radius: 3px; }
+.sticky-note textarea { flex: 1; min-height: 0; width: 100%; padding: 12px; border: 0; outline: none; background: transparent; color: inherit; resize: none; line-height: 1.5; }
+.sticky-note textarea::placeholder { color: #867343; }
+.sticky-note [role=alert] { padding: 6px; font-size: 12px; color: #8b251e; }
 button, input, textarea { font: inherit; }
 button { cursor: pointer; }
 button:disabled { opacity: .4; cursor: not-allowed; }
