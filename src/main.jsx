@@ -69,7 +69,7 @@ const nodeTypes = { agent: AgentNode };
 function Canvas() {
   const [state, setState] = useState({ agents: [], edges: [] });
   const [nodes, setNodes] = useState([]);
-  const [form, setForm] = useState({ name: '', workdir: '', task: '', mode: 'new' });
+  const [form, setForm] = useState({ name: '', workdir: '', mode: 'new' });
   const [open, setOpen] = useState(false);
   const [docsOpen, setDocsOpen] = useState(false);
   const [guide, setGuide] = useState('');
@@ -120,8 +120,8 @@ function Canvas() {
     e.preventDefault(); setError('');
     try {
       const position = screenToFlowPosition({ x: innerWidth / 2 - 210, y: innerHeight / 2 - 160 });
-      await api('/agents', 'POST', { ...form, task: form.mode === 'new' ? form.task : undefined, x: position.x, y: position.y });
-      setForm(f => ({ ...f, name: '', task: '' })); setOpen(false);
+      await api('/agents', 'POST', { ...form, x: position.x, y: position.y });
+      setForm(f => ({ ...f, name: '' })); setOpen(false);
     } catch (err) { setError(err.message); }
   };
   return <div className="app">
@@ -151,9 +151,9 @@ function Canvas() {
       </div>
       <label>Node name<input autoFocus required maxLength="100" placeholder="e.g. Researcher" value={form.name} onChange={e => setForm({ ...form, name: e.target.value })} /></label>
       <label>Working directory<input required placeholder="/absolute/path/to/project" value={form.workdir} onChange={e => setForm({ ...form, workdir: e.target.value })} /></label>
-      {form.mode === 'new'
-        ? <label>First task<textarea required rows="5" placeholder="What should this agent work on?" value={form.task} onChange={e => setForm({ ...form, task: e.target.value })} /></label>
-        : <p className="mode-help">Pi will open its session picker for this working directory inside the terminal. Choose a saved session there; no initial task is sent.</p>}
+      <p className="mode-help">{form.mode === 'new'
+        ? 'Pi will open a new session. Type your first instruction directly in the terminal.'
+        : 'Pi will open its session picker for this working directory inside the terminal. Choose a saved session there.'}</p>
       {error && <div className="node-error">{error}</div>}
       <div className="modal-actions"><button type="button" onClick={() => setOpen(false)}>Cancel</button><button className="primary" type="submit">{form.mode === 'resume' ? 'Open session picker →' : 'Launch agent →'}</button></div>
     </form></div>}

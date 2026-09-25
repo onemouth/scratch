@@ -26,7 +26,7 @@ curl -fsS -X POST "$AGENT_CANVAS_URL/api/agents" \
   -d '{"name":"Researcher","workdir":"/absolute/path/to/project","task":"Investigate the parser and report findings","parentId":"<YOUR_AGENT_ID>"}'
 ```
 
-Required: `name` (max 100 chars), `workdir` (existing directory; use an absolute path), and `task` (initial instruction) for a new session. Optional: `parentId`, the ID of the delegating agent. Supplying `parentId` **automatically creates a directed `delegates` edge** from parent to child. The response contains the new agent's ID. Omit `parentId` to create an independent agent. Each agent has its own Pi process; both can work in the same directory, so coordinate edits to avoid conflicts. New Pi sessions are saved by Pi, but the Canvas layout is not persisted.
+Required: `name` (max 100 chars) and `workdir` (existing directory; use an absolute path). For a new session, `task` is optional: when omitted, Pi opens interactively with an empty editor; when supplied, it runs as the initial instruction. When delegating work, supply a specific task so the worker knows what to do. Optional: `parentId`, the ID of the delegating agent. Supplying `parentId` **automatically creates a directed `delegates` edge** from parent to child. The response contains the new agent's ID. Omit `parentId` to create an independent agent. Each agent has its own Pi process; both can work in the same directory, so coordinate edits to avoid conflicts. New Pi sessions are saved by Pi, but the Canvas layout is not persisted.
 
 When launched by the Canvas, substitute your ID by constructing the JSON safely (for example with `jq`):
 
