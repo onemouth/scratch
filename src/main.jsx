@@ -86,8 +86,9 @@ function AgentNode({ id, data, selected }) {
   const remove = async () => {
     try { await api(`/agents/${id}`, 'DELETE'); } catch (e) { setError(e.message); }
   };
-  return <div className={`agent-node ${agent.status}`}>
-    <NodeResizer isVisible={selected} minWidth={320} minHeight={240} onResizeEnd={(_, p) => api(`/agents/${id}`, 'PATCH', { width: p.width, height: p.height }).catch(console.error)} />
+  return <>
+    <NodeResizer isVisible={selected} minWidth={320} minHeight={240} onResizeEnd={(_, p) => api(`/agents/${id}`, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message))} />
+    <div className={`agent-node ${agent.status}`}>
     <Handle type="target" position={Position.Left} />
     <header className="node-header">
       <span className="status-dot" /><strong title={agent.name}>{agent.name}</strong><span className="badge">{agent.status}</span>
@@ -101,7 +102,8 @@ function AgentNode({ id, data, selected }) {
     {agent.restoreWarning && <div className="node-error">{agent.restoreWarning}</div>}
     {error && <div className="node-error">{error}</div>}
     <Handle type="source" position={Position.Right} />
-  </div>;
+    </div>
+  </>;
 }
 
 function StickyNote({ id, data, selected }) {
