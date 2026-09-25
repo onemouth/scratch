@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ReactFlow, Background, Controls, Handle, MiniMap, NodeResizer, Position, BaseEdge, EdgeLabelRenderer, getBezierPath, applyNodeChanges, useReactFlow, ReactFlowProvider } from '@xyflow/react';
+import { ReactFlow, Background, Controls, Handle, MiniMap, NodeResizer, Position, BaseEdge, EdgeLabelRenderer, getBezierPath, applyNodeChanges, useReactFlow, useViewport, ReactFlowProvider } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -105,15 +105,9 @@ function AgentNode({ id, data, selected }) {
 }
 
 function StickyNote({ id, data, selected }) {
-  const [editingTitle, setEditingTitle] = useState(false);
-  const [title, setTitle] = useState('');
-  const cancelTitle = React.useRef(false);
-  const saveTitle = async () => {
-    setEditingTitle(false);
-    if (cancelTitle.current) { cancelTitle.current = false; return; }
-    try { await api(`/notes/${id}`, 'PATCH', { title: title.trim() || 'Note' }); setError(''); }
-    catch (e) { setError(e.message); }
-  };
+  const { zoom } = useViewport();
+  // Keep at least 14 screen pixels of text while the paper follows canvas zoom.
+  const fontSize = Math.max(16, 14 / zoom);
   const [text, setText] = useState(data.note.text);
   const [error, setError] = useState('');
   const dirty = React.useRef(false);
@@ -123,9 +117,9 @@ function StickyNote({ id, data, selected }) {
     try { await api(`/notes/${id}`, 'PATCH', { text }); dirty.current = false; setError(''); }
     catch (e) { setError(e.message); }
   };
-  return <div className="sticky-note">
+  return <div className="sticky-note" style={{ fontSize }}>
     <NodeResizer isVisible={selected} minWidth={160} minHeight={160} onResizeEnd={(_, p) => api(`/notes/${id}`, 'PATCH', { width: p.width, height: p.height }).catch(e => setError(e.message))} />
-    <header>{editingTitle ? <input className="note-title-input nodrag" aria-label="Note title" value={title} maxLength={100} autoFocus onFocus={e => e.target.select()} onChange={e => setTitle(e.target.value)} onBlur={saveTitle} onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); e.currentTarget.blur(); } if (e.key === 'Escape') { cancelTitle.current = true; e.currentTarget.blur(); } }} /> : <button className="note-title nodrag" title="Edit note title" onClick={() => { setTitle(data.note.title || 'Note'); setEditingTitle(true); }}>{data.note.title || 'Note'}</button>}<button className="icon-btn nodrag" aria-label="Delete note" onClick={() => api(`/notes/${id}`, 'DELETE').catch(e => setError(e.message))}>×</button></header>
+    <button className="note-delete icon-btn nodrag" aria-label="Delete note" onClick={() => api(`/notes/${id}`, 'DELETE').catch(e => setError(e.message))}>×</button>
     <textarea className="nodrag nowheel" aria-label="Note text" placeholder="Write a note…" maxLength={10000} value={text} onChange={e => { dirty.current = true; setText(e.target.value); }} onBlur={save} />
     {error && <div role="alert">{error}<button className="nodrag" onClick={save}>Retry save</button></div>}
   </div>;

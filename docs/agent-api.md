@@ -105,7 +105,7 @@ Notes are at most 500 characters and appear on the node. Only update **your own*
 
 ## Canvas sticky notes
 
-Sticky notes are independent text nodes, not agents or delegation targets. `POST /api/notes` creates one with optional `title` (1–100 characters, trimmed, defaults to `Note`) and `text` (up to 10,000 characters, empty allowed). `PATCH /api/notes/:id` updates its `title` or `text`; `DELETE /api/notes/:id` removes it. State includes `notes` with `id`, `title`, `text`, and layout fields. Layout fields (`x`, `y`, `width`, `height`; minimum size 160) are for the human UI. Notes are auto-saved across server restarts. Only edit or remove a user's notes when asked.
+Sticky notes are independent text nodes, not agents or delegation targets. `POST /api/notes` creates one with optional `title` (1–100 characters, trimmed, defaults to `Note`) and `text` (up to 10,000 characters, empty allowed). `PATCH /api/notes/:id` updates its `title` or `text`; `DELETE /api/notes/:id` removes it. State includes `notes` with `id`, `title`, `text`, and layout fields. The UI displays only body text; `title` remains stored and supported by the API for compatibility, but is not shown or editable in the UI. Layout fields (`x`, `y`, `width`, `height`; minimum size 160) are for the human UI. Notes are auto-saved across server restarts. Only edit or remove a user's notes when asked.
 
 ## Restore and reset
 
