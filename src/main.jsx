@@ -7,6 +7,7 @@ import { FitAddon } from '@xterm/addon-fit';
 import Markdown from 'react-markdown';
 import '@xterm/xterm/css/xterm.css';
 import './style.css';
+import { pasteChunks } from './terminal-paste.js';
 
 async function api(path, method = 'GET', body) {
   const response = await fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -32,6 +33,18 @@ function PtyTerminal({ id, stopped }) {
     const observer = new ResizeObserver(resize);
     observer.observe(container.current);
     const input = terminal.onData(data => send({ type: 'input', data }));
+    const element = container.current;
+    const onPaste = event => {
+      if (!event.clipboardData) return;
+      event.preventDefault();
+      event.stopImmediatePropagation();
+      const text = event.clipboardData.getData('text/plain');
+      if (!text || socket?.readyState !== WebSocket.OPEN) return;
+      for (const data of pasteChunks(text)) send({ type: 'input', data });
+    };
+    // Capture before xterm handles paste, preventing duplicate input and relying
+    // on neither initial terminal setup bytes nor truncated output replay.
+    element.addEventListener('paste', onPaste, true);
     const connect = () => {
       socket = new WebSocket(`${location.protocol === 'https:' ? 'wss:' : 'ws:'}//${location.host}/api/terminal/${id}`);
       socket.onopen = () => { terminal.reset(); resize(); };
@@ -39,7 +52,7 @@ function PtyTerminal({ id, stopped }) {
       socket.onclose = () => { if (alive) retry = setTimeout(connect, 1500); };
     };
     connect();
-    return () => { alive = false; clearTimeout(retry); socket?.close(); observer.disconnect(); input.dispose(); terminal.dispose(); termRef.current = null; };
+    return () => { alive = false; clearTimeout(retry); socket?.close(); element.removeEventListener('paste', onPaste, true); observer.disconnect(); input.dispose(); terminal.dispose(); termRef.current = null; };
   }, [id]);
   useEffect(() => { if (stopped) termRef.current?.blur(); }, [stopped]);
   return <div className="terminal nodrag nowheel" ref={container} onMouseDown={e => e.stopPropagation()} onDoubleClick={e => e.stopPropagation()} />;
