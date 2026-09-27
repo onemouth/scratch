@@ -305,7 +305,6 @@ function Canvas() {
       <Background color="#243148" gap={24} size={1} /><Controls /><MiniMap pannable zoomable nodeColor={n => n.type === 'note' ? '#f4d77b' : n.data.agent.status === 'running' ? '#9dd9ad' : '#526582'} />
     </ReactFlow>
     {state.agents.length === 0 && !(state.notes || []).length && <div className="empty"><div className="empty-icon">✳</div><h1>Space for your agents.</h1><p>Start a Pi agent, then connect agents to map real delegation.</p><button type="button" className="primary" onClick={openLaunch}>＋ Create your first agent</button><span>{pointerMode === 'mouse' ? 'Right-drag canvas to pan · Wheel to zoom' : 'Drag or two-finger scroll to pan · Pinch to zoom'}</span></div>}
-    <div className="hint">Drag nodes · Resize selected nodes · Connect handles to delegate · Click label to edit · Click edge to remove</div>
     <div className="pointer-mode" role="group" aria-label="Canvas pointer mode">
       <button type="button" className={pointerMode === 'mouse' ? 'active' : ''} aria-pressed={pointerMode === 'mouse'} onClick={() => setPointerMode('mouse')} title="Right-drag to pan · Wheel to zoom">Mouse</button>
       <button type="button" className={pointerMode === 'touchpad' ? 'active' : ''} aria-pressed={pointerMode === 'touchpad'} onClick={() => setPointerMode('touchpad')} title="Two-finger scroll to pan · Pinch to zoom">Touchpad</button>
