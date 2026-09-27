@@ -82,23 +82,39 @@ function PtyTerminal({ id, stopped, focusRequest }) {
 function AgentNode({ id, data, selected }) {
   const agent = data.agent;
   const [error, setError] = useState('');
+  const { x, y, zoom } = useViewport();
+  const [windowSize, setWindowSize] = useState(() => ({ width: innerWidth, height: innerHeight }));
+  useEffect(() => {
+    if (!data.maximized) return;
+    const resize = () => setWindowSize({ width: innerWidth, height: innerHeight });
+    window.addEventListener('resize', resize);
+    resize();
+    return () => window.removeEventListener('resize', resize);
+  }, [data.maximized]);
+  // React Flow transforms both the viewport and the node. Cancel those transforms
+  // only for this window; the saved node layout and the terminal DOM stay intact.
+  const maximizeStyle = data.maximized ? {
+    position: 'absolute', left: -x / zoom - data.position.x, top: -y / zoom - data.position.y,
+    width: windowSize.width, height: windowSize.height, transform: `scale(${1 / zoom})`, transformOrigin: 'top left',
+  } : undefined;
   const stop = async () => { try { await api(`/agents/${id}/stop`, 'POST'); } catch (e) { setError(e.message); } };
   const remove = async () => {
     try { await api(`/agents/${id}`, 'DELETE'); } catch (e) { setError(e.message); }
   };
   return <>
-    <NodeResizer isVisible={selected} minWidth={320} minHeight={240} onResizeEnd={(_, p) => api(`/agents/${id}`, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message))} />
-    <div className={`agent-node ${agent.status}`}>
+    <NodeResizer isVisible={selected && !data.maximized} minWidth={320} minHeight={240} onResizeEnd={(_, p) => api(`/agents/${id}`, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message))} />
+    <div className={`agent-node ${agent.status}${data.maximized ? ' maximized' : ''}`} style={maximizeStyle}>
     <Handle type="target" position={Position.Left} />
     <header className="node-header">
       <span className="status-dot" /><strong title={agent.name}>{agent.name}</strong><span className="badge">{agent.status}</span>
-      {agent.status === 'running' && <button className="icon-btn nodrag" title="Stop agent" aria-label={`Stop ${agent.name}`} onClick={stop}>■</button>}
+      <button type="button" className="icon-btn nodrag" title={data.maximized ? 'Return to whiteboard (Esc)' : 'Maximize agent'} aria-label={data.maximized ? `Return ${agent.name} to whiteboard` : `Maximize ${agent.name}`} onClick={() => data.onMaximize(data.maximized ? null : id)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{data.maximized ? <><path d="M8 4H4v4M16 4h4v4M4 16v4h4M20 16v4h-4" /><rect x="8" y="8" width="8" height="8" /></> : <rect x="4" y="4" width="16" height="16" rx="1" />}</svg></button>
+      {agent.status === 'running' && <button className="icon-btn nodrag" title="Stop agent" aria-label={`Stop ${agent.name}`} onClick={stop}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 5l14 14M19 5L5 19" /></svg></button>}
       {agent.status === 'stopped' && <button className="icon-btn nodrag" title="Reopen conversation (no task sent)" aria-label={`Resume ${agent.name}`} onClick={() => api(`/agents/${id}/resume`, 'POST').then(() => data.onFocus(id)).catch(e => setError(e.message))}>▶</button>}
       {agent.status === 'stopped' && <button className="icon-btn nodrag" title="Remove node from canvas" aria-label={`Remove ${agent.name} from canvas`} onClick={remove}>×</button>}
     </header>
     <div className="node-subtitle" title={agent.workdir}>{agent.workdir}</div>
     {agent.note && <div className="node-note" title={agent.note}>{agent.note}</div>}
-    <PtyTerminal id={id} stopped={agent.status === 'stopped'} focusRequest={data.focusRequest} />
+    <PtyTerminal id={id} stopped={agent.status === 'stopped'} focusRequest={data.maximized ? `maximized-${data.maximizeFocus}` : data.focusRequest} />
     {agent.restoreWarning && <div className="node-error">{agent.restoreWarning}</div>}
     {error && <div className="node-error">{error}</div>}
     <Handle type="source" position={Position.Right} />
@@ -160,6 +176,17 @@ const edgeTypes = { delegates: DelegationEdge };
 function Canvas() {
   const [state, setState] = useState({ agents: [], edges: [] });
   const [nodes, setNodes] = useState([]);
+  const [maximizedId, setMaximizedId] = useState(null);
+  const [maximizeFocus, setMaximizeFocus] = useState(0);
+  const maximizeAgent = useCallback(id => { setMaximizedId(id); if (id) setMaximizeFocus(n => n + 1); }, []);
+  useEffect(() => {
+    if (!maximizedId) return;
+    const escape = event => {
+      if (event.key === 'Escape') { event.preventDefault(); maximizeAgent(null); }
+    };
+    window.addEventListener('keydown', escape, true);
+    return () => window.removeEventListener('keydown', escape, true);
+  }, [maximizedId, maximizeAgent]);
   const [form, setForm] = useState({ name: '', workdir: '', mode: 'new' });
   const [open, setOpen] = useState(false);
   const [savedWorkdirs, setSavedWorkdirs] = useState([]);
@@ -217,6 +244,7 @@ function Canvas() {
       const added = knownAgents && next.agents.filter(agent => !knownAgents.has(agent.id));
       knownAgents = new Set(next.agents.map(agent => agent.id));
       setState(next);
+      setMaximizedId(id => id && !next.agents.some(agent => agent.id === id) ? null : id);
       // Initial load/reconnect does not steal focus; live API-created agents do.
       if (added?.length) focusAgent(added.at(-1).id);
     };
@@ -229,14 +257,15 @@ function Canvas() {
         const old = byId.get(agent.id);
         return {
           id: agent.id, type: 'agent', position: old?.dragging ? old.position : { x: agent.x, y: agent.y },
-          style: { width: agent.width, height: agent.height }, data: { agent, onFocus: focusAgent, focusRequest: !open && !docsOpen && focusTarget?.id === agent.id ? focusTarget.request : 0 }, selected: old?.selected,
+          style: { width: agent.width, height: agent.height }, zIndex: maximizedId === agent.id ? 10000 : undefined,
+          data: { agent, position: old?.dragging ? old.position : { x: agent.x, y: agent.y }, maximized: maximizedId === agent.id, onMaximize: maximizeAgent, maximizeFocus, onFocus: focusAgent, focusRequest: !open && !docsOpen && focusTarget?.id === agent.id ? focusTarget.request : 0 }, selected: old?.selected,
         };
       }), ...(state.notes || []).map(note => {
         const old = byId.get(note.id);
         return { id: note.id, type: 'note', dragHandle: '.note-drag-handle', position: old?.dragging ? old.position : { x: note.x, y: note.y }, style: { width: note.width, height: note.height }, data: { note }, selected: old?.selected };
       })];
     });
-  }, [state.agents, state.notes, focusTarget, open, docsOpen, focusAgent]);
+  }, [state.agents, state.notes, focusTarget, open, docsOpen, focusAgent, maximizedId, maximizeAgent, maximizeFocus]);
   useEffect(() => {
     if (!focusTarget || open || docsOpen || centeredRequest.current === focusTarget.request) return;
     const node = nodes.find(node => node.id === focusTarget.id);
@@ -270,9 +299,9 @@ function Canvas() {
       setForm(f => ({ ...f, name: '' })); setOpen(false);
     } catch (err) { setError(err.message); }
   };
-  return <div className="app">
+  return <div className={`app${maximizedId ? ' is-maximized' : ''}`}>
     <div className="topbar"><div className="brand"><span className="brand-icon">✳</span> Agent Canvas <small>PI WORKSPACE</small></div><div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button" onClick={resetCanvas}>Reset Canvas</button><button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></div></div>
-    <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={pointerMode === 'mouse' ? [2] : true} panOnScroll={pointerMode === 'touchpad'} panOnScrollSpeed={1} zoomOnScroll={pointerMode === 'mouse'} zoomOnPinch zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
+    <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={!maximizedId && (pointerMode === 'mouse' ? [2] : true)} panOnScroll={!maximizedId && pointerMode === 'touchpad'} panOnScrollSpeed={1} zoomOnScroll={!maximizedId && pointerMode === 'mouse'} zoomOnPinch={!maximizedId} nodesDraggable={!maximizedId} nodesConnectable={!maximizedId} zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
       <Background color="#243148" gap={24} size={1} /><Controls /><MiniMap pannable zoomable nodeColor={n => n.type === 'note' ? '#f4d77b' : n.data.agent.status === 'running' ? '#9dd9ad' : '#526582'} />
     </ReactFlow>
     {state.agents.length === 0 && !(state.notes || []).length && <div className="empty"><div className="empty-icon">✳</div><h1>Space for your agents.</h1><p>Start a Pi agent, then connect agents to map real delegation.</p><button type="button" className="primary" onClick={openLaunch}>＋ Create your first agent</button><span>{pointerMode === 'mouse' ? 'Right-drag canvas to pan · Wheel to zoom' : 'Drag or two-finger scroll to pan · Pinch to zoom'}</span></div>}
