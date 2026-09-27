@@ -179,7 +179,7 @@ function Canvas() {
     try { localStorage.setItem('agent-canvas:pointer-mode', pointerMode); }
     catch { /* Keep controls usable when browser storage is unavailable. */ }
   }, [pointerMode]);
-  const { screenToFlowPosition, setCenter } = useReactFlow();
+  const { screenToFlowPosition, setCenter, getZoom } = useReactFlow();
   const [focusTarget, setFocusTarget] = useState(null);
   const focusSequence = React.useRef(0);
   const centeredRequest = React.useRef(0);
@@ -243,8 +243,10 @@ function Canvas() {
     if (!node) return;
     centeredRequest.current = focusTarget.request;
     setNodes(previous => previous.map(item => ({ ...item, selected: item.id === node.id })));
-    setCenter(node.position.x + node.style.width / 2, node.position.y + node.style.height / 2, { zoom: 1, duration: 200 });
-  }, [nodes, focusTarget, open, docsOpen, setCenter]);
+    // Center within the currently visible viewport, not at canvas origin;
+    // preserve the user's current zoom level while bringing the node into view.
+    setCenter(node.position.x + node.style.width / 2, node.position.y + node.style.height / 2, { zoom: getZoom(), duration: 200 });
+  }, [nodes, focusTarget, open, docsOpen, setCenter, getZoom]);
   const onNodesChange = useCallback(changes => setNodes(ns => applyNodeChanges(changes, ns)), []);
   const onNodeDragStop = useCallback((_, node) => { api(`/${node.type === 'note' ? 'notes' : 'agents'}/${node.id}`, 'PATCH', { x: node.position.x, y: node.position.y }).catch(console.error); }, []);
   const onConnect = useCallback(async ({ source, target }) => { try { await api('/edges', 'POST', { source, target }); } catch (e) { setError(e.message); } }, []);
