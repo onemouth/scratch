@@ -8,6 +8,7 @@ import Markdown from 'react-markdown';
 import '@xterm/xterm/css/xterm.css';
 import './style.css';
 import { pasteChunks } from './terminal-paste.js';
+import { correctTerminalMouseScale } from './terminal-mouse-scale.js';
 import { completedAgents } from './agent-notifications.js';
 
 async function api(path, method = 'GET', body) {
@@ -27,6 +28,7 @@ function PtyTerminal({ id, stopped, focusRequest }) {
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(container.current);
+    correctTerminalMouseScale(terminal);
     termRef.current = terminal;
     let socket;
     let retry;
