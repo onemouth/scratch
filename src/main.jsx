@@ -1,6 +1,6 @@
 import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
-import { ReactFlow, Background, Controls, Handle, MiniMap, NodeResizer, Position, BaseEdge, EdgeLabelRenderer, getBezierPath, applyNodeChanges, useReactFlow, useViewport, ReactFlowProvider } from '@xyflow/react';
+import { ReactFlow, Background, Controls, ControlButton, Handle, MiniMap, NodeResizer, Position, BaseEdge, EdgeLabelRenderer, getBezierPath, applyNodeChanges, useReactFlow, useViewport, ReactFlowProvider } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -302,13 +302,12 @@ function Canvas() {
   return <div className={`app${maximizedId ? ' is-maximized' : ''}`}>
     <div className="topbar"><div className="brand"><span className="brand-icon">✳</span> Agent Canvas <small>PI WORKSPACE</small></div><div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button" onClick={resetCanvas}>Reset Canvas</button><button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></div></div>
     <ReactFlow nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={!maximizedId && (pointerMode === 'mouse' ? [2] : true)} panOnScroll={!maximizedId && pointerMode === 'touchpad'} panOnScrollSpeed={1} zoomOnScroll={!maximizedId && pointerMode === 'mouse'} zoomOnPinch={!maximizedId} nodesDraggable={!maximizedId} nodesConnectable={!maximizedId} zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
-      <Background color="#243148" gap={24} size={1} /><Controls /><MiniMap pannable zoomable nodeColor={n => n.type === 'note' ? '#f4d77b' : n.data.agent.status === 'running' ? '#9dd9ad' : '#526582'} />
+      <Background color="#243148" gap={24} size={1} />
+      <Controls>
+        <ControlButton className="pointer-toggle" aria-label={`Pointer mode: ${pointerMode === 'mouse' ? 'Mouse' : 'Touchpad'}. Click to switch to ${pointerMode === 'mouse' ? 'Touchpad' : 'Mouse'}`} title={pointerMode === 'mouse' ? 'Mouse · Right-drag to pan, wheel to zoom · Click for Touchpad' : 'Touchpad · Two-finger scroll to pan, pinch to zoom · Click for Mouse'} onClick={() => setPointerMode(mode => mode === 'mouse' ? 'touchpad' : 'mouse')}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8">{pointerMode === 'mouse' ? <><rect x="5" y="2" width="14" height="20" rx="7" /><path d="M12 2v7M5 10h14" /></> : <><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 15h20" /></>}</svg></ControlButton>
+      </Controls><MiniMap pannable zoomable nodeColor={n => n.type === 'note' ? '#f4d77b' : n.data.agent.status === 'running' ? '#9dd9ad' : '#526582'} />
     </ReactFlow>
     {state.agents.length === 0 && !(state.notes || []).length && <div className="empty"><div className="empty-icon">✳</div><h1>Space for your agents.</h1><p>Start a Pi agent, then connect agents to map real delegation.</p><button type="button" className="primary" onClick={openLaunch}>＋ Create your first agent</button><span>{pointerMode === 'mouse' ? 'Right-drag canvas to pan · Wheel to zoom' : 'Drag or two-finger scroll to pan · Pinch to zoom'}</span></div>}
-    <div className="pointer-mode" role="group" aria-label="Canvas pointer mode">
-      <button type="button" className={pointerMode === 'mouse' ? 'active' : ''} aria-pressed={pointerMode === 'mouse'} onClick={() => setPointerMode('mouse')} title="Right-drag to pan · Wheel to zoom">Mouse</button>
-      <button type="button" className={pointerMode === 'touchpad' ? 'active' : ''} aria-pressed={pointerMode === 'touchpad'} onClick={() => setPointerMode('touchpad')} title="Two-finger scroll to pan · Pinch to zoom">Touchpad</button>
-    </div>
     {state.persistence?.error && <div className="save-error" role="alert">Canvas is not saved: {state.persistence.error}</div>}
     {error && !open && <div className="toast" onClick={() => setError('')}>{error} ×</div>}
     {docsOpen && <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) setDocsOpen(false); }}><section className="modal guide-modal" role="dialog" aria-modal="true" aria-label="Agent API Guide">
