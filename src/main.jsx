@@ -107,7 +107,7 @@ function AgentNode({ id, data, selected }) {
     <Handle type="target" position={Position.Left} />
     <header className="node-header">
       <span className="status-dot" /><strong title={agent.name}>{agent.name}</strong><span className="badge">{agent.status}</span>
-      <button type="button" className="icon-btn nodrag" title={data.maximized ? 'Return to whiteboard (Esc)' : 'Maximize agent'} aria-label={data.maximized ? `Return ${agent.name} to whiteboard` : `Maximize ${agent.name}`} onClick={() => data.onMaximize(data.maximized ? null : id)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{data.maximized ? <><path d="M8 4H4v4M16 4h4v4M4 16v4h4M20 16v4h-4" /><rect x="8" y="8" width="8" height="8" /></> : <rect x="4" y="4" width="16" height="16" rx="1" />}</svg></button>
+      <button type="button" className="icon-btn nodrag" title={data.maximized ? 'Return to whiteboard' : 'Maximize agent'} aria-label={data.maximized ? `Return ${agent.name} to whiteboard` : `Maximize ${agent.name}`} onClick={() => data.onMaximize(data.maximized ? null : id)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{data.maximized ? <><path d="M8 4H4v4M16 4h4v4M4 16v4h4M20 16v4h-4" /><rect x="8" y="8" width="8" height="8" /></> : <rect x="4" y="4" width="16" height="16" rx="1" />}</svg></button>
       {agent.status === 'running' && <button className="icon-btn nodrag" title="Stop agent" aria-label={`Stop ${agent.name}`} onClick={stop}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 5l14 14M19 5L5 19" /></svg></button>}
       {agent.status === 'stopped' && <button className="icon-btn nodrag" title="Reopen conversation (no task sent)" aria-label={`Resume ${agent.name}`} onClick={() => api(`/agents/${id}/resume`, 'POST').then(() => data.onFocus(id)).catch(e => setError(e.message))}>▶</button>}
       {agent.status === 'stopped' && <button className="icon-btn nodrag" title="Remove node from canvas" aria-label={`Remove ${agent.name} from canvas`} onClick={remove}>×</button>}
@@ -179,14 +179,6 @@ function Canvas() {
   const [maximizedId, setMaximizedId] = useState(null);
   const [maximizeFocus, setMaximizeFocus] = useState(0);
   const maximizeAgent = useCallback(id => { setMaximizedId(id); if (id) setMaximizeFocus(n => n + 1); }, []);
-  useEffect(() => {
-    if (!maximizedId) return;
-    const escape = event => {
-      if (event.key === 'Escape') { event.preventDefault(); maximizeAgent(null); }
-    };
-    window.addEventListener('keydown', escape, true);
-    return () => window.removeEventListener('keydown', escape, true);
-  }, [maximizedId, maximizeAgent]);
   const [form, setForm] = useState({ name: '', workdir: '', mode: 'new' });
   const [open, setOpen] = useState(false);
   const [savedWorkdirs, setSavedWorkdirs] = useState([]);
