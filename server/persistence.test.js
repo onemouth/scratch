@@ -35,11 +35,14 @@ test('autosave, exact session restore, stopped nodes, session switches, reset an
     const token = one.children[0].options.env.AGENT_CANVAS_RUN;
     assert.equal((await request(app, `/agents/${parent.id}/session`, { runToken: 'stale', sessionId: 'session-1', sessionFile: session })).status, 409);
     assert.equal((await request(app, `/agents/${parent.id}/session`, { runToken: token, sessionId: 'session-1', sessionFile: session })).status, 200);
+    assert.equal((await request(app, `/agents/${parent.id}/activity`, { runToken: token, state: 'working', seq: 1 })).status, 200);
+    assert.equal(app.snapshot().agents[0].activity, 'working');
     await request(app, `/agents/${child.id}/stop`, {});
     await request(app, '/notes', { title: 'Plan', text: 'Keep this', x: 40, y: 70 });
     await request(app, `/agents/${parent.id}`, { name: 'Renamed', x: 99 }, 'PATCH');
     await new Promise(resolve => setTimeout(resolve, 350));
     assert.equal(JSON.parse(await readFile(file, 'utf8')).agents[0].name, 'Renamed');
+    assert.equal(JSON.parse(await readFile(file, 'utf8')).agents[0].activity, undefined);
     await app.close();
     await app.close(); // Repeated shutdown must not persist shutdown-induced stopped states.
     assert.equal(JSON.parse(await readFile(file, 'utf8')).agents[0].status, 'running');
@@ -52,6 +55,7 @@ test('autosave, exact session restore, stopped nodes, session switches, reset an
     assert.ok(!two.children[0].args.includes('--'));
     assert.deepEqual(two.children[0].inputs, []);
     assert.equal(app.snapshot().agents[0].id, parent.id);
+    assert.equal(app.snapshot().agents[0].activity, 'unknown');
     assert.equal(app.snapshot().agents[0].x, 99);
     assert.equal(app.snapshot().agents[1].status, 'stopped');
     assert.equal(app.snapshot().edges[0].target, child.id);

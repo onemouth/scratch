@@ -77,6 +77,16 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.equal(fakeSpawn.children[0].options.cwd, process.cwd());
     assert.deepEqual(fakeSpawn.children[0].args.slice(-2), ['--', 'hello']);
     assert.ok(!fakeSpawn.children[0].args.includes('--no-session'));
+    const activityPath = `/api/agents/${first.id}/activity`;
+    const runToken = fakeSpawn.children[0].options.env.AGENT_CANVAS_RUN;
+    assert.equal(app.snapshot().agents.find(agent => agent.id === first.id).activity, 'unknown');
+    assert.equal((await request(activityPath, 'POST', { runToken: 'wrong', state: 'working', seq: 1 })).status, 409);
+    assert.equal((await request(activityPath, 'POST', { runToken, state: 'blocked', seq: 1 })).status, 400);
+    assert.equal((await request(activityPath, 'POST', { runToken, state: 'working', seq: 1 })).status, 200);
+    assert.equal((await request(activityPath, 'POST', { runToken, state: 'idle', seq: 0 })).status, 200);
+    assert.equal(app.snapshot().agents.find(agent => agent.id === first.id).activity, 'working');
+    assert.equal((await request(activityPath, 'POST', { runToken, state: 'idle', seq: 2 })).status, 200);
+    assert.equal(app.snapshot().agents.find(agent => agent.id === first.id).activity, 'idle');
     assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), mode: 'unknown' })).status, 400);
     assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), task: '  ' })).status, 400);
     const blank = (await request('/api/agents', 'POST', { name: 'Blank session', workdir: process.cwd() })).data;
@@ -151,6 +161,8 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.equal((await request(`/api/agents/${first.id}`, 'DELETE')).status, 409);
     assert.equal((await request(`/api/agents/${first.id}/stop`, 'POST')).status, 200);
     assert.equal(app.snapshot().agents[0].status, 'stopped');
+    assert.equal(app.snapshot().agents[0].activity, 'unknown');
+    assert.equal((await request(activityPath, 'POST', { runToken, state: 'idle', seq: 3 })).status, 409);
     assert.equal(app.snapshot().edges.length, 2);
     assert.equal((await request(`/api/agents/${first.id}`, 'DELETE')).status, 200);
     assert.ok(!app.snapshot().agents.some(agent => agent.id === first.id));

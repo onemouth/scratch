@@ -69,12 +69,13 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   let saveTimer;
   let saveError = '';
   const runs = new Map();
-  const snapshot = () => ({ agents: [...agents.values()], edges: [...edges.values()], notes: [...notes.values()], persistence: { enabled: !!stateFile, error: saveError } });
+  const activity = new Map();
+  const snapshot = (live = true) => ({ agents: [...agents.values()].map(agent => live ? { ...agent, activity: activity.get(agent.id)?.state ?? 'unknown' } : agent), edges: [...edges.values()], notes: [...notes.values()], persistence: { enabled: !!stateFile, error: saveError } });
   const flush = () => {
     clearTimeout(saveTimer);
     saveTimer = undefined;
     if (!started) return;
-    try { saveCanvas(stateFile, snapshot()); saveError = ''; }
+    try { saveCanvas(stateFile, snapshot(false)); saveError = ''; }
     catch (error) { saveError = error.message; console.error('Canvas save failed:', error.message); }
   };
   const broadcast = () => {
@@ -82,14 +83,14 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     if (stateFile) { clearTimeout(saveTimer); saveTimer = setTimeout(() => { flush(); publish(); }, 250); }
     publish();
   };
+  const publishImmediate = () => {
+    const data = `data: ${JSON.stringify(snapshot())}\n\n`;
+    for (const client of clients) client.write(data);
+  };
   const publish = () => {
     if (pending) return;
     pending = true;
-    setTimeout(() => {
-      pending = false;
-      const data = `data: ${JSON.stringify(snapshot())}\n\n`;
-      for (const client of clients) client.write(data);
-    }, 50);
+    setTimeout(() => { pending = false; publishImmediate(); }, 50);
   };
   const output = (agent, text) => {
     agent.output = (agent.output + text).slice(-MAX_OUTPUT);
@@ -179,6 +180,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     agent.output = '';
     const runToken = randomUUID();
     runs.set(id, { token: runToken, ready: false });
+    activity.delete(id);
     const base = `http://127.0.0.1:${server.address()?.port || port}`;
     const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The canvas API is at ${base}/api. Use your bash tool with curl to interact with it. GET /api/state reads all agents and delegation relationships. POST /api/agents with JSON {"name":"...","workdir":"absolute path","task":"...","parentId":"${id}"} creates a child agent and a delegation edge. POST /api/edges with {"source":"${id}","target":"agent-id"} records delegation without sending messages. POST /api/messages with {"toId":"agent-id","fromId":"${id}","text":"..."} sends an explicit message to a running agent's Pi TTY; use toName instead of toId only when the name is unique. PATCH /api/agents/${id} with {"note":"short progress summary"} updates your note. Relationships represent real delegation; only create them when delegating actual work. Never modify canvas coordinates. This API is local to this server. Read the full guide with curl -fsS ${base}/api/docs when you need examples or details.`;
     let child;
@@ -194,6 +196,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       });
     } catch (error) {
       runs.delete(id);
+      activity.delete(id);
       agent.status = 'stopped';
       throw Object.assign(new Error(`Could not start pi: ${error.message}`), { status: 500 });
     }
@@ -206,6 +209,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       processes.delete(id);
       const run = runs.get(id);
       runs.delete(id);
+      activity.delete(id);
       const wasStopping = agent.status === 'stopping';
       agent.status = 'stopped';
       if (!closing && !wasStopping && restoring && exactSession && !run?.ready && exitCode !== 0 && agents.has(id)) {
@@ -280,7 +284,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           for (const agent of agents.values()) if (processes.has(agent.id)) agent.status = 'stopping';
           try { await stopProcesses(); }
           catch (error) { resetting = false; broadcast(); throw error; }
-          processes.clear(); runs.clear();
+          processes.clear(); runs.clear(); activity.clear();
           for (const group of terminals.values()) for (const ws of group) ws.terminate();
           terminals.clear(); agents.clear(); notes.clear(); edges.clear();
           resetting = false;
@@ -300,6 +304,20 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           run.ready = true;
           agent.restoreWarning = '';
           broadcast(); return reply(res, 200, { ok: true });
+        }
+        const activityMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/activity$/);
+        if (activityMatch && req.method === 'POST') {
+          const agent = requireAgent(activityMatch[1]);
+          const run = runs.get(agent.id);
+          if (!run || body.runToken !== run.token) return reply(res, 409, { error: 'Stale Pi process' });
+          if (!['working', 'idle'].includes(body.state) || !Number.isSafeInteger(body.seq) || body.seq < 0) throw new Error('Invalid activity report');
+          const previous = activity.get(agent.id);
+          if (!previous || body.seq > previous.seq) {
+            activity.set(agent.id, { state: body.state, seq: body.seq });
+            // Activity is ephemeral: no disk write or saved completion replay.
+            publishImmediate(); // Do not coalesce a very fast working → idle turn.
+          }
+          return reply(res, 200, { ok: true });
         }
         if (url.pathname === '/api/agents' && req.method === 'POST') return reply(res, 201, createAgent(body));
         if (url.pathname === '/api/messages' && req.method === 'POST') return reply(res, 202, sendMessage(body));
@@ -360,7 +378,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
             if (agent.status !== 'stopped' || processes.has(agent.id)) {
               throw Object.assign(new Error('Stop the agent before removing it'), { status: 409 });
             }
-            agents.delete(agent.id);
+            agents.delete(agent.id); activity.delete(agent.id);
             for (const [id, edge] of edges) {
               if (edge.source === agent.id || edge.target === agent.id) edges.delete(id);
             }

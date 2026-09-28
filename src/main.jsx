@@ -8,6 +8,7 @@ import Markdown from 'react-markdown';
 import '@xterm/xterm/css/xterm.css';
 import './style.css';
 import { pasteChunks } from './terminal-paste.js';
+import { completedAgents } from './agent-notifications.js';
 
 async function api(path, method = 'GET', body) {
   const response = await fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -190,6 +191,26 @@ function Canvas() {
   const [copied, setCopied] = useState(false);
   const [error, setError] = useState('');
   const [connected, setConnected] = useState(false);
+  const [notificationsEnabled, setNotificationsEnabled] = useState(() => {
+    try { return typeof Notification !== 'undefined' && Notification.permission === 'granted' && localStorage.getItem('agent-canvas:notifications') === 'on'; }
+    catch { return false; }
+  });
+  const notificationsRef = React.useRef(notificationsEnabled);
+  notificationsRef.current = notificationsEnabled;
+  const toggleNotifications = async () => {
+    if (notificationsEnabled) {
+      setNotificationsEnabled(false);
+      try { localStorage.setItem('agent-canvas:notifications', 'off'); } catch { /* Optional preference. */ }
+      return;
+    }
+    if (typeof Notification === 'undefined') { setError('This browser does not support desktop notifications.'); return; }
+    try {
+      const permission = await Notification.requestPermission();
+      if (permission !== 'granted') { setError('Allow notifications for this site in your browser settings to enable alerts.'); return; }
+      try { localStorage.setItem('agent-canvas:notifications', 'on'); } catch { /* Allow alerts for this tab even without storage. */ }
+      setNotificationsEnabled(true);
+    } catch { setError('Could not enable browser notifications.'); }
+  };
   const [pointerMode, setPointerMode] = useState(() => {
     try { return localStorage.getItem('agent-canvas:pointer-mode') === 'touchpad' ? 'touchpad' : 'mouse'; }
     catch { return 'mouse'; }
@@ -229,11 +250,23 @@ function Canvas() {
   useEffect(() => {
     const stream = new EventSource('/api/events');
     let knownAgents = null;
-    stream.onopen = () => { knownAgents = null; setConnected(true); };
+    let previousActivity = null;
+    stream.onopen = () => { knownAgents = null; previousActivity = null; setConnected(true); };
     stream.onerror = () => setConnected(false);
     stream.onmessage = (e) => {
       const next = JSON.parse(e.data);
       const added = knownAgents && next.agents.filter(agent => !knownAgents.has(agent.id));
+      if (notificationsRef.current && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
+        for (const agent of completedAgents(previousActivity, next.agents)) {
+          const activeNode = document.activeElement?.closest?.('.react-flow__node-agent');
+          if (document.hasFocus() && activeNode?.getAttribute('data-id') === agent.id) continue;
+          try {
+            const notification = new Notification('Agent finished · Agent Canvas', { body: agent.name, tag: `agent-canvas:${agent.id}` });
+            notification.onclick = () => { window.focus(); setMaximizedId(null); focusAgent(agent.id); notification.close(); };
+          } catch { /* Browser notification service may be unavailable. */ }
+        }
+      }
+      previousActivity = new Map(next.agents.map(agent => [agent.id, agent.activity]));
       knownAgents = new Set(next.agents.map(agent => agent.id));
       setState(next);
       setMaximizedId(id => id && !next.agents.some(agent => agent.id === id) ? null : id);
@@ -292,7 +325,7 @@ function Canvas() {
     } catch (err) { setError(err.message); }
   };
   return <div className={`app${maximizedId ? ' is-maximized' : ''}`}>
-    <div className="topbar"><div className="brand"><span className="brand-icon">✳</span> Agent Canvas <small>PI WORKSPACE</small></div><div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button" onClick={resetCanvas}>Reset Canvas</button><button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></div></div>
+    <div className="topbar"><div className="brand"><span className="brand-icon">✳</span> Agent Canvas <small>PI WORKSPACE</small></div><div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button notification-toggle" type="button" aria-label={notificationsEnabled ? 'Disable browser notifications' : 'Enable browser notifications'} title={notificationsEnabled ? 'Browser notifications on · click to turn off' : 'Browser notifications off · click to enable'} aria-pressed={notificationsEnabled} onClick={toggleNotifications}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4" />{!notificationsEnabled && <path d="M3 3l18 18" />}</svg></button><button className="guide-button" onClick={resetCanvas}>Reset Canvas</button><button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></div></div>
     <ReactFlow proOptions={{ hideAttribution: true }} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={!maximizedId && (pointerMode === 'mouse' ? [2] : true)} panOnScroll={!maximizedId && pointerMode === 'touchpad'} panOnScrollSpeed={1} zoomOnScroll={!maximizedId && pointerMode === 'mouse'} zoomOnPinch={!maximizedId} nodesDraggable={!maximizedId} nodesConnectable={!maximizedId} zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} fitView fitViewOptions={{ padding: 0.3 }} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
       <Background color="#243148" gap={24} size={1} />
       <Controls>

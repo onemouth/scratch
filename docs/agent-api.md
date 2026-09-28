@@ -16,7 +16,7 @@ You can use the Agent Canvas API to observe the shared canvas, create Pi agents,
 curl -fsS "$AGENT_CANVAS_URL/api/state"
 ```
 
-Returns `{ "agents": [...], "edges": [...], "notes": [...], "persistence": { "enabled": true, "error": "" } }`. Agents have `id`, `name`, `workdir`, `task`, `status` (`running` or `stopped`), `note`, recent raw terminal `output`, and layout fields. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
+Returns `{ "agents": [...], "edges": [...], "notes": [...], "persistence": { "enabled": true, "error": "" } }`. Agents have `id`, `name`, `workdir`, `task`, process `status` (`running` or `stopped`), live `activity` (`unknown`, `working`, or `idle`), `note`, recent raw terminal `output`, and layout fields. `activity` is transient and resets to `unknown` on restart until Pi reports its state; an `idle` agent is available for more work, not stopped. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
 
 ## Delegate work to a new Pi agent
 
@@ -113,7 +113,7 @@ On server restart, previously running agents reopen their recorded session witho
 
 `POST /api/canvas/reset` with `{"confirm":true}` stops all agents and clears/saves an empty Canvas. **Only do this when the user explicitly requests resetting the entire Canvas.** Pi sessions and project files are not deleted. The browser provides confirmation; API clients must obtain user confirmation themselves.
 
-The internal `POST /api/agents/:id/session` callback is reserved for the bundled Pi session tracker; agents should not call it. It records session identity on startup and session changes without sending messages. `sessionFile` and `sessionId` on agent records identify the conversation, not the Canvas node.
+The internal `POST /api/agents/:id/session` and `POST /api/agents/:id/activity` callbacks are reserved for the bundled Pi extension; agents should not call them. The first records session identity; the second reports ordered `working`/`idle` turn state with a per-process run token. Neither sends messages or prompts. `sessionFile` and `sessionId` on agent records identify the conversation, not the Canvas node.
 
 ## Other interfaces and boundaries
 

@@ -32,6 +32,8 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .guide-button { background: #26334b; color: #d3ddf3; border: 1px solid #43536e; border-radius: 8px; padding: 10px 13px; font-size: 12px; font-weight: 600; }
 .guide-button:hover { background: #354560; }
 .topbar .primary, .topbar .guide-button { padding: 4px 8px; font-size: 10px; border-radius: 5px; white-space: nowrap; }
+.topbar .notification-toggle { width: 24px; height: 24px; padding: 3px; display: grid; place-items: center; }
+.notification-toggle svg { width: 15px; height: 15px; }
 .react-flow__controls { background: #1c2739; border: 1px solid #3a4760; box-shadow: none; border-radius: 8px; overflow: hidden; }
 .react-flow__controls-button { background: #1c2739; fill: #bdc9de; border-color: #3a4760; }
 .react-flow__controls-button:hover { background: #2c3950; }
