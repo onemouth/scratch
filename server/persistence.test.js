@@ -51,6 +51,7 @@ test('autosave, exact session restore, stopped nodes, session switches, reset an
     await app.listen();
     assert.equal(two.children.length, 1);
     assert.deepEqual(two.children[0].args.slice(0, 2), ['--session', session]);
+    assert.ok(two.children[0].args.includes('--skill'));
     assert.ok(!two.children[0].args.includes('DO NOT REPLAY'));
     assert.ok(!two.children[0].args.includes('--'));
     assert.deepEqual(two.children[0].inputs, []);
@@ -95,7 +96,10 @@ test('missing session uses picker, failed exact launch falls back once, missing 
     assert.equal(mock.children[2].args[0], '--resume');
     mock.children[2].emit('exit', { exitCode: 1 });
     assert.equal(mock.children.length, 3);
-    for (const child of mock.children) assert.ok(!child.args.includes('NEVER SEND'));
+    for (const child of mock.children) {
+      assert.ok(!child.args.includes('NEVER SEND'));
+      assert.ok(child.args.includes('--skill'));
+    }
     assert.equal((await request(app, '/agents/exact/resume', {})).status, 200);
     assert.equal(mock.children.length, 4);
   } finally { await app.close(); await rm(dir, { recursive: true, force: true }); }

@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { mkdtemp, mkdir, writeFile, rm } from 'node:fs/promises';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { WebSocket } from 'ws';
 import { createApp } from './index.js';
@@ -75,6 +76,14 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     const first = (await request('/api/agents', 'POST', { name: 'parent', task: 'hello', workdir: process.cwd() })).data;
     assert.equal(first.status, 'running');
     assert.equal(fakeSpawn.children[0].options.cwd, process.cwd());
+    const assertCanvasSkill = child => {
+      const index = child.args.indexOf('--skill');
+      assert.ok(index >= 0);
+      assert.equal(child.args[index + 1], fileURLToPath(new URL('../skills/agent-canvas/SKILL.md', import.meta.url)));
+      assert.ok(child.args.includes('--extension'));
+      assert.match(child.args[child.args.indexOf('--append-system-prompt') + 1], /agent-canvas skill/);
+    };
+    assertCanvasSkill(fakeSpawn.children[0]);
     assert.deepEqual(fakeSpawn.children[0].args.slice(-2), ['--', 'hello']);
     assert.ok(!fakeSpawn.children[0].args.includes('--no-session'));
     const activityPath = `/api/agents/${first.id}/activity`;
@@ -92,11 +101,13 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     const blank = (await request('/api/agents', 'POST', { name: 'Blank session', workdir: process.cwd() })).data;
     assert.equal(blank.task, '');
     assert.ok(!fakeSpawn.children[1].args.includes('--'));
+    assertCanvasSkill(fakeSpawn.children[1]);
     assert.ok(fakeSpawn.children[1].args.includes('--name'));
     const resumed = (await request('/api/agents', 'POST', { name: 'Earlier work', workdir: process.cwd(), mode: 'resume' })).data;
     assert.equal(resumed.mode, 'resume');
     assert.equal(resumed.task, '');
     assert.ok(fakeSpawn.children[2].args.includes('--resume'));
+    assertCanvasSkill(fakeSpawn.children[2]);
     assert.ok(!fakeSpawn.children[2].args.includes('--no-session'));
     assert.ok(!fakeSpawn.children[2].args.includes('--name'));
     assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), mode: 'resume', task: 'ignored?' })).status, 400);

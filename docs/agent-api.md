@@ -5,7 +5,7 @@ You can use the Agent Canvas API to observe the shared canvas, create Pi agents,
 ## Locate the server and your identity
 
 - This web guide substitutes the **current running API URL** into every command below, so you can copy it into an agent as-is. The server listens on the same machine at `127.0.0.1`; pasted commands will not work on a different machine.
-- Canvas-launched agents also have `AGENT_CANVAS_URL` and `AGENT_CANVAS_ID` (their own node ID) in their environment.
+- Canvas-launched agents receive the `agent-canvas` skill via Pi's `--skill` option and have `AGENT_CANVAS_URL` and `AGENT_CANVAS_ID` (their own node ID) in their environment. The skill points to this live guide; it does not install anything globally.
 - If this guide was pasted into a different agent, tell it whether it has a Canvas node, and provide that node's ID if so. **Do not assume an external agent already has a node**: agents not launched by the Canvas do not have `AGENT_CANVAS_ID`.
 - Canvas-launched agents can also fetch this guide: `curl -fsS "$AGENT_CANVAS_URL/api/docs"`.
 - The API accepts JSON. Replace `<...>` placeholders in the examples. Only use an existing directory for `workdir`.

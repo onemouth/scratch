@@ -26,7 +26,8 @@ For persistence checks, set `AGENT_CANVAS_STATE_FILE` to a temporary path. Creat
 
 - `server/index.js` — live state, auto-save/restore orchestration, validation, Pi PTYs, HTTP/SSE/WebSocket, static production assets, served API guide.
 - `server/canvas-store.js` — snapshot validation, atomic save and previous-save backup.
-- `server/pi-session-tracker.js` — Pi lifecycle extension reporting exact conversation identity.
+- `server/pi-session-tracker.js` — Pi lifecycle extension reporting exact conversation identity and turn activity.
+- `skills/agent-canvas/SKILL.md` — explicitly loaded for each Canvas-launched Pi; directs API work to the running server's full guide.
 - `server/persistence.test.js` — isolated save/restart, fallback, reset and corruption tests.
 - `server/index.test.js` — API lifecycle, saved-session workdirs, delegation, explicit TTY messaging, terminal I/O and guide URL tests using a fake PTY.
 - `src/main.jsx` — canvas and terminal browser UI.

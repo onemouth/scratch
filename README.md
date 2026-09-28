@@ -28,7 +28,7 @@ On restart, previously running nodes automatically reopen their exact Pi convers
 ## Documentation
 
 - [Architecture](docs/architecture.md) — processes, canvas state, PTY streaming, lifecycle and boundaries.
-- [Agent API Guide](docs/agent-api.md) — copyable instructions for agents; also available in the browser via **API Guide** or `GET /api/docs`. The web version fills in the correct browser-facing localhost URL.
+- [Agent API Guide](docs/agent-api.md) — copyable instructions for agents; also available in the browser via **API Guide** or `GET /api/docs`. The web version fills in the correct browser-facing localhost URL. Canvas-launched Pi agents automatically receive the [agent-canvas skill](skills/agent-canvas/SKILL.md), which points them to the current full guide on the running server.
 - [Development](docs/development.md) — installation, ports, tests and source map.
 
 For a single-server production-style run: `npm run build && npm start`, then open http://127.0.0.1:3001. Do not expose this unauthenticated local service to a network.

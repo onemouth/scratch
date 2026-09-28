@@ -182,10 +182,10 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     runs.set(id, { token: runToken, ready: false });
     activity.delete(id);
     const base = `http://127.0.0.1:${server.address()?.port || port}`;
-    const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The canvas API is at ${base}/api. Use your bash tool with curl to interact with it. GET /api/state reads all agents and delegation relationships. POST /api/agents with JSON {"name":"...","workdir":"absolute path","task":"...","parentId":"${id}"} creates a child agent and a delegation edge. POST /api/edges with {"source":"${id}","target":"agent-id"} records delegation without sending messages. POST /api/messages with {"toId":"agent-id","fromId":"${id}","text":"..."} sends an explicit message to a running agent's Pi TTY; use toName instead of toId only when the name is unique. PATCH /api/agents/${id} with {"note":"short progress summary"} updates your note. Relationships represent real delegation; only create them when delegating actual work. Never modify canvas coordinates. This API is local to this server. Read the full guide with curl -fsS ${base}/api/docs when you need examples or details.`;
+    const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The local canvas API is at ${base}/api. When working with Canvas agents, delegation, messages, or progress notes, read and follow the agent-canvas skill. The skill points to the current API guide. Relationships represent real delegation, not automatic messaging. Never modify canvas coordinates.`;
     let child;
     try {
-      const common = ['--extension', join(root, 'server', 'pi-session-tracker.js'), '--append-system-prompt', instructions];
+      const common = ['--extension', join(root, 'server', 'pi-session-tracker.js'), '--skill', join(root, 'skills', 'agent-canvas', 'SKILL.md'), '--append-system-prompt', instructions];
       const args = restoring
         ? [...(exactSession ? ['--session', agent.sessionFile] : ['--resume']), ...common]
         : mode === 'resume' ? ['--resume', ...common]
