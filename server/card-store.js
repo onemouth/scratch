@@ -19,7 +19,7 @@ export class CardStore {
     try {
       if (file !== ':memory:') chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 2) throw new Error('Unsupported card database version');
+      if (version > 3) throw new Error('Unsupported card database version');
       this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
@@ -34,6 +34,18 @@ export class CardStore {
         PRAGMA user_version=2;
         COMMIT;
       `);
+      if (version < 3) {
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+          const timestamp = this.now().toISOString();
+          for (const row of this.db.prepare('SELECT id, links FROM cards').all()) {
+            const links = validateCardLinks(JSON.parse(row.links));
+            this.checkLinks(links, row.id, links);
+            this.syncReciprocalLinks(row.id, links, [], timestamp);
+          }
+          this.db.exec('PRAGMA user_version=3; COMMIT;');
+        } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+      }
     } catch (error) { this.db.close(); throw error; }
   }
   decode(row) {
@@ -50,6 +62,20 @@ export class CardStore {
     }
     return values;
   }
+  // Call only within a transaction: either both endpoints change or neither does.
+  syncReciprocalLinks(id, links, previous, timestamp) {
+    const next = new Set(links);
+    for (const targetId of new Set([...previous, ...links])) {
+      const target = this.db.prepare('SELECT links FROM cards WHERE id=?').get(targetId);
+      if (!target) continue; // Keep historical references to deleted cards.
+      const existing = validateCardLinks(JSON.parse(target.links));
+      const updated = next.has(targetId) ? [...new Set([...existing, id])] : existing.filter(link => link !== id);
+      if (updated.length > 100) throw new Error(`Linked card ${targetId} would exceed 100 links`);
+      if (JSON.stringify(updated) !== JSON.stringify(existing)) {
+        this.db.prepare('UPDATE cards SET links=?, updated_at=? WHERE id=?').run(JSON.stringify(updated), timestamp, targetId);
+      }
+    }
+  }
   create({ content = '', tags = [], links = [] } = {}) {
     validateCardContent(content); tags = validateTags(tags);
     links = this.checkLinks(links);
@@ -59,18 +85,25 @@ export class CardStore {
       const { number } = this.db.prepare('INSERT INTO card_sequences(day,number) VALUES (?,1) ON CONFLICT(day) DO UPDATE SET number=number+1 RETURNING number').get(day);
       const id = day + '-' + String(number).padStart(4, '0');
       this.db.prepare('INSERT INTO cards (id,content,tags,created_at,updated_at,links) VALUES (?,?,?,?,?,?)').run(id, content, JSON.stringify(tags), timestamp, timestamp, JSON.stringify(links));
+      this.syncReciprocalLinks(id, links, [], timestamp);
       this.db.exec('COMMIT');
       return this.get(id);
     } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   update(id, body) {
-    const card = this.get(id);
-    const content = body.content === undefined ? card.content : body.content;
-    const tags = body.tags === undefined ? card.tags : validateTags(body.tags);
-    const links = body.links === undefined ? card.links : this.checkLinks(body.links, id, card.links);
-    validateCardContent(content);
-    this.db.prepare('UPDATE cards SET content=?, tags=?, links=?, updated_at=? WHERE id=?').run(content, JSON.stringify(tags), JSON.stringify(links), this.now().toISOString(), id);
-    return this.get(id);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const card = this.get(id);
+      const content = body.content === undefined ? card.content : body.content;
+      const tags = body.tags === undefined ? card.tags : validateTags(body.tags);
+      const links = body.links === undefined ? card.links : this.checkLinks(body.links, id, card.links);
+      validateCardContent(content);
+      const timestamp = this.now().toISOString();
+      this.db.prepare('UPDATE cards SET content=?, tags=?, links=?, updated_at=? WHERE id=?').run(content, JSON.stringify(tags), JSON.stringify(links), timestamp, id);
+      this.syncReciprocalLinks(id, links, card.links, timestamp);
+      this.db.exec('COMMIT');
+      return this.get(id);
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   delete(id) { this.get(id); this.db.prepare('DELETE FROM cards WHERE id=?').run(id); }
   async backup() {

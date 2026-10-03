@@ -44,6 +44,7 @@ Test card creation, content/metadata editing and flipping, debounced auto-save, 
 - `server/persistence.test.js` — isolated save/restart, fallback, reset and corruption tests.
 - `server/index.test.js` — API lifecycle, saved-session workdirs, delegation, explicit TTY messaging, terminal I/O and guide URL tests using a fake PTY.
 - `server/card-store.js` — SQLite cards, schema version, daily sequences, startup backup.
+- `server/card-links.test.js`, `server/card-links-migration.test.js` — reciprocal additions/removals, timestamps, atomic rollback on full targets, v2 backfill and historical references.
 - `server/cards.test.js`, `server/card-store.test.js` — isolated card API, persistence and backup tests.
 - `shared/card-content.js` — shared Markdown validation and 400-unit counter.
 - `src/cards.jsx` — front/back editable cards shared by both workspace modes.

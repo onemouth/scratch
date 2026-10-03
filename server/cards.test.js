@@ -57,8 +57,11 @@ test('card API, placement persistence, removal, reset and permanent deletion', a
     const third = await request('/cards', 'POST', { content: 'Linked', links: [second.data.id], place: false });
     assert.equal(third.status, 201);
     assert.deepEqual(third.data.links, [second.data.id]);
+    assert.deepEqual((await request('/cards/' + second.data.id)).data.links, [third.data.id]);
+    assert.deepEqual(app.snapshot().cards.find(card => card.id === second.data.id).links, [third.data.id]);
     assert.equal((await request('/cards/' + third.data.id, 'PATCH', { links: [third.data.id] })).status, 400);
     assert.equal((await request('/cards/' + third.data.id, 'PATCH', { links: [] })).status, 200);
     assert.deepEqual((await request('/cards/' + third.data.id)).data.links, []);
+    assert.deepEqual((await request('/cards/' + second.data.id)).data.links, []);
   } finally { await app.close(); await rm(dir, { recursive: true, force: true }); }
 });
