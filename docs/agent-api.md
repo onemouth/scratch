@@ -16,7 +16,32 @@ You can use the Agent Canvas API to observe the shared canvas, create Pi agents,
 curl -fsS "$AGENT_CANVAS_URL/api/state"
 ```
 
-Returns `{ "agents": [...], "edges": [...], "notes": [...], "persistence": { "enabled": true, "error": "" } }`. Agents have `id`, `name`, `workdir`, `task`, process `status` (`running` or `stopped`), live `activity` (`unknown`, `working`, or `idle`), `note`, recent raw terminal `output`, and layout fields. `activity` is transient and resets to `unknown` on restart until Pi reports its state; an `idle` agent is available for more work, not stopped. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
+Returns `{ "agents": [...], "edges": [...], "notes": [...], "cards": [...], "cardPlacements": [...], "cardBox": { "placements": [...] }, "persistence": { "enabled": true, "error": "" } }`. Agents have `workspace` (`agents` or `card-box`; absent on older records means `agents`), `id`, `name`, `workdir`, `task`, process `status` (`running` or `stopped`), live `activity` (`unknown`, `working`, or `idle`), `note`, recent raw terminal `output`, and layout fields. `activity` is transient and resets to `unknown` on restart until Pi reports its state; an `idle` agent is available for more work, not stopped. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
+
+## Card box
+
+Cards are independent of sticky notes. Read all cards with `GET /api/cards` (returns `{cards: [...]}`, newest ID first), or one with `GET /api/cards/:id`. A card contains `id`, `content`, `tags`, `links`, `units`, `createdAt`, and `updatedAt`. IDs are assigned by the server from its local date plus a daily non-reused sequence (`YYYY-MM-DD-0001`) and cannot be changed.
+
+- `POST /api/cards`: `{"content":"**One idea**","tags":["reading"],"links":["<EXISTING_CARD_ID>"],"place":true}`. Returns the card (201). All fields are optional; defaults are empty content/tags/links and `place:true`. With `place:false`, the card has no Agent Canvas node, but still appears automatically in Card box.
+- `PATCH /api/cards/:id`: update only `content`, `tags` and/or `links`; returns the updated card. Updates are atomic; invalid content, tags or links change nothing.
+- `DELETE /api/cards/:id`: requires `{"confirm":true}`; **permanently deletes** the card and any placement.
+- `POST /api/cards/:id/placement` with `{}`: place an existing library card on the Canvas, idempotently. Returns its placement. Each card has at most one placement in Agent Canvas, independent of its Card box placement.
+- `DELETE /api/card-placements/:id` with `{}`: remove only the placement, preserving the card.
+- `PATCH /api/card-placements/:id`: human UI layout updates (`x,y,width,height`, minimum size 240). **Agents must not change layout coordinates.**
+
+Content supports text Markdown (headings, emphasis, lists, blockquotes, code, normal links), not images or raw HTML. Limit: **600 text units**, CJK graphemes individually plus non-CJK words using Unicode word segmentation. Formatting, whitespace, punctuation and link destinations do not count. Code counts as text. Source is limited to 20,000 characters. Tags are a flat array of at most 30 unique trimmed strings, each at most 60 characters, no commas/newlines. Empty content is allowed. `links` is an array of up to 100 card IDs, trimmed and deduplicated; self-links and new references to absent cards return 400. Links are one-way metadata, not delegation or Canvas edges. Existing references to deleted cards remain stored and may be retained in later updates; setting `links: []` clears them. Links and tags are outside the content-unit limit.
+
+Validation errors return 400; absent cards/placements return 404. Only create or modify the user's cards when asked. Library contents persist in SQLite independently of the Canvas JSON; removing a placement or resetting the Canvas does not delete library cards. Do not interpret cards as delegation relationships.
+
+## Card box workspace lifecycle (human UI)
+
+Card box automatically displays every library card with its own persisted placement in `state.cardBox.placements`. New cards receive an initial free grid position; existing layouts are never rearranged. Permanent deletion removes both placements.
+
+- `POST /api/card-box/agent` with `{}`: create its single fixed New-session Pi agent in the database directory. Returns 201; subsequent launch attempts return 409. The agent appears in `state.agents` with `workspace: "card-box"`.
+- Use existing `/api/agents/:id/stop` and `/resume` for its lifecycle. Removal is rejected (409); delegation to/from it is rejected (400), including creating a child with its `parentId`.
+- `PATCH /api/card-box/placements/:cardId`: human UI position/size updates; minimum size 240. No placement-removal endpoint: all library cards appear here. **Agents must not modify coordinates.**
+
+Switching workspaces does not stop agents. Agent Canvas reset preserves Card box agent, layout and library. These endpoints support the workspace UI; no query API or selected-card-to-agent interaction is introduced. Use card APIs, never directly edit SQLite, Canvas JSON or lock files.
 
 ## Delegate work to a new Pi agent
 
@@ -111,7 +136,7 @@ Sticky notes are independent text nodes, not agents or delegation targets. `POST
 
 On server restart, previously running agents reopen their recorded session without sending a prompt or replaying interrupted work. A missing/invalid session falls back to Pi's picker. Missing workdirs leave stopped nodes with `restoreWarning`. Previously stopped nodes stay stopped. `POST /api/agents/:id/resume` reopens a stopped node's conversation (or picker), retaining its ID and edges. Do not resume another agent unless asked.
 
-`POST /api/canvas/reset` with `{"confirm":true}` stops all agents and clears/saves an empty Canvas. **Only do this when the user explicitly requests resetting the entire Canvas.** Pi sessions and project files are not deleted. The browser provides confirmation; API clients must obtain user confirmation themselves.
+`POST /api/canvas/reset` with `{"confirm":true}` stops only Agent Canvas agents and clears its nodes/notes/edges/placements. The Card box agent, layouts and library are preserved. **Only do this when the user explicitly requests resetting the entire Canvas.** Pi sessions and project files are not deleted. The browser provides confirmation; API clients must obtain user confirmation themselves.
 
 The internal `POST /api/agents/:id/session` and `POST /api/agents/:id/activity` callbacks are reserved for the bundled Pi extension; agents should not call them. The first records session identity; the second reports ordered `working`/`idle` turn state with a per-process run token. Neither sends messages or prompts. `sessionFile` and `sessionId` on agent records identify the conversation, not the Canvas node.
 

@@ -1,12 +1,15 @@
 import http from 'node:http';
+import { CardStore } from './card-store.js';
+import { syncCardBoxPlacements } from './card-box-layout.js';
+import { storagePaths } from './storage-paths.js';
 import { lockCanvas, loadCanvas, saveCanvas } from './canvas-store.js';
 import pty from 'node-pty';
 import { WebSocketServer, WebSocket } from 'ws';
 import { randomUUID } from 'node:crypto';
-import { existsSync, statSync, createReadStream, readFileSync } from 'node:fs';
+import { existsSync, statSync, createReadStream, readFileSync, mkdirSync } from 'node:fs';
 import { readdir, open, stat } from 'node:fs/promises';
 import { homedir } from 'node:os';
-import { resolve, join, extname, isAbsolute } from 'node:path';
+import { resolve, join, extname, isAbsolute, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -51,12 +54,15 @@ async function savedWorkdirs(sessionRoot) {
   return [...workdirs.values()].sort((a, b) => b.lastUsed - a.lastUsed || a.path.localeCompare(b.path));
 }
 
-export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = pty.spawn, stateFile = null,
+export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = pty.spawn, stateFile = null, cardsFile = stateFile ? stateFile + '.cards.sqlite' : ':memory:',
   sessionsRoot = process.env.PI_CODING_AGENT_SESSION_DIR || join(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'), 'sessions') } = {}) {
   const agents = new Map();
   const processes = new Map();
   const edges = new Map();
   const notes = new Map();
+  const cardPlacements = new Map();
+  const boxPlacements = new Map();
+  let cards;
   const clients = new Set();
   const terminals = new Map();
   const wss = new WebSocketServer({ noServer: true });
@@ -66,11 +72,12 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   let resetting = false;
   let closePromise;
   let unlock = () => {};
+  let unlockCards = () => {};
   let saveTimer;
   let saveError = '';
   const runs = new Map();
   const activity = new Map();
-  const snapshot = (live = true) => ({ agents: [...agents.values()].map(agent => live ? { ...agent, activity: activity.get(agent.id)?.state ?? 'unknown' } : agent), edges: [...edges.values()], notes: [...notes.values()], persistence: { enabled: !!stateFile, error: saveError } });
+  const snapshot = (live = true) => ({ agents: [...agents.values()].map(agent => live ? { ...agent, activity: activity.get(agent.id)?.state ?? 'unknown' } : agent), edges: [...edges.values()], notes: [...notes.values()], cardPlacements: [...cardPlacements.values()], cardBox: { placements: [...boxPlacements.values()] }, ...(live ? { cards: cards?.list() ?? [] } : {}), persistence: { enabled: !!stateFile, error: saveError } });
   const flush = () => {
     clearTimeout(saveTimer);
     saveTimer = undefined;
@@ -84,6 +91,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     publish();
   };
   const publishImmediate = () => {
+    if (closing) return;
     const data = `data: ${JSON.stringify(snapshot())}\n\n`;
     for (const client of clients) client.write(data);
   };
@@ -133,7 +141,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     return value.trim();
   };
   const connect = (source, target, label = 'delegates') => {
-    requireAgent(source); requireAgent(target);
+    if ([requireAgent(source), requireAgent(target)].some(agent => agent.workspace === 'card-box')) throw new Error('Card box agent does not support delegation edges');
     const displayLabel = edgeLabel(label);
     if (source === target) throw new Error('Cannot delegate to self');
     const existing = [...edges.values()].find((edge) => edge.source === source && edge.target === target);
@@ -143,7 +151,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     broadcast();
     return edge;
   };
-  const createAgent = (body) => {
+  const createAgent = (body, workspace = 'agents') => {
     const mode = body.mode ?? 'new';
     if (!['new', 'resume'].includes(mode)) throw new Error('mode must be new or resume');
     if (!validText(body.name, 100) || !validText(body.workdir, 2048)) throw new Error('name and workdir are required');
@@ -151,15 +159,16 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     if (mode === 'resume' && body.task !== undefined) throw new Error('task cannot be set when resuming a session');
     const workdir = resolve(body.workdir);
     if (!existsSync(workdir) || !statSync(workdir).isDirectory()) throw new Error('workdir must be an existing directory');
-    if (body.parentId) requireAgent(body.parentId);
+    if (body.parentId && requireAgent(body.parentId).workspace === 'card-box') throw new Error('Card box agent does not support delegation');
     const id = randomUUID();
     const index = agents.size;
     const agent = {
-      id, name: body.name.trim(), workdir, mode, task: mode === 'new' ? (body.task?.trim() ?? '') : '', status: 'running', output: '',
+      id, workspace, name: body.name.trim(), workdir, mode, task: mode === 'new' ? (body.task?.trim() ?? '') : '', status: 'running', output: '',
       note: '', x: Number.isFinite(body.x) ? body.x : 100 + (index % 3) * 490,
       y: Number.isFinite(body.y) ? body.y : 100 + Math.floor(index / 3) * 380,
       width: 440, height: 320,
     };
+    if (workspace === 'card-box') Object.assign(agent, { x: 40, y: 80, width: 440, height: 420 });
     startAgent(agent);
     if (body.parentId) connect(body.parentId, id);
     return agent;
@@ -182,7 +191,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     runs.set(id, { token: runToken, ready: false });
     activity.delete(id);
     const base = `http://127.0.0.1:${server.address()?.port || port}`;
-    const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The local canvas API is at ${base}/api. When working with Canvas agents, delegation, messages, or progress notes, read and follow the agent-canvas skill. The skill points to the current API guide. Relationships represent real delegation, not automatic messaging. Never modify canvas coordinates.`;
+    const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The local canvas API is at ${base}/api. When working with Canvas agents, delegation, messages, progress notes, or card-box cards, read and follow the agent-canvas skill. The skill points to the current API guide. Relationships represent real delegation, not automatic messaging. Never modify canvas coordinates.${agent.workspace === 'card-box' ? ' You are the single Card box agent. Use the Canvas API for card operations when asked; never directly edit SQLite, Canvas JSON, backup or lock files in your workdir.' : ''}`;
     let child;
     try {
       const common = ['--extension', join(root, 'server', 'pi-session-tracker.js'), '--skill', join(root, 'skills', 'agent-canvas', 'SKILL.md'), '--append-system-prompt', instructions];
@@ -223,8 +232,8 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     return agent;
   };
 
-  const stopProcesses = async () => {
-    await Promise.all([...processes.values()].map(child => new Promise((resolveStop, rejectStop) => {
+  const stopProcesses = async (children = [...processes.values()]) => {
+    await Promise.all(children.map(child => new Promise((resolveStop, rejectStop) => {
       let timeout;
       let escalation;
       const cleanup = () => { clearTimeout(timeout); clearTimeout(escalation); };
@@ -281,16 +290,80 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           if (body.confirm !== true) throw new Error('Reset requires confirm: true');
           resetting = true;
           clearTimeout(saveTimer);
-          for (const agent of agents.values()) if (processes.has(agent.id)) agent.status = 'stopping';
-          try { await stopProcesses(); }
+          const removed = [...agents.values()].filter(agent => agent.workspace !== 'card-box');
+          for (const agent of removed) if (processes.has(agent.id)) agent.status = 'stopping';
+          try { await stopProcesses(removed.map(agent => processes.get(agent.id)).filter(Boolean)); }
           catch (error) { resetting = false; broadcast(); throw error; }
-          processes.clear(); runs.clear(); activity.clear();
-          for (const group of terminals.values()) for (const ws of group) ws.terminate();
-          terminals.clear(); agents.clear(); notes.clear(); edges.clear();
+          for (const agent of removed) {
+            for (const ws of terminals.get(agent.id) || []) ws.terminate();
+            terminals.delete(agent.id); processes.delete(agent.id); runs.delete(agent.id); activity.delete(agent.id); agents.delete(agent.id);
+          }
+          notes.clear(); edges.clear(); cardPlacements.clear();
           resetting = false;
           flush(); publish();
           if (saveError) return reply(res, 500, { error: `Canvas cleared in memory but could not save reset: ${saveError}` });
           return reply(res, 200, { ok: true });
+        }
+        if (url.pathname === '/api/card-box/agent' && req.method === 'POST') {
+          if (Object.keys(body).length) throw new Error('Card box agent launch takes an empty object');
+          if ([...agents.values()].some(agent => agent.workspace === 'card-box')) return reply(res, 409, { error: 'Card box agent already exists; resume its conversation' });
+          const workdir = cardsFile === ':memory:' ? join(homedir(), 'Documents', 'agent-canvas') : dirname(resolve(cardsFile));
+          mkdirSync(workdir, { recursive: true, mode: 0o700 });
+          return reply(res, 201, createAgent({ name: 'Card box', workdir, mode: 'new' }, 'card-box'));
+        }
+        const boxPlacementMatch = url.pathname.match(/^\/api\/card-box\/placements\/([^/]+)$/);
+        if (boxPlacementMatch && req.method === 'PATCH') {
+          const placement = boxPlacements.get(boxPlacementMatch[1]);
+          if (!placement) return reply(res, 404, { error: 'Card box placement not found' });
+          const updates = {};
+          for (const [key, value] of Object.entries(body)) {
+            if (!['x', 'y', 'width', 'height'].includes(key) || !Number.isFinite(value) || (['width', 'height'].includes(key) && value < 240)) throw new Error('Invalid placement dimensions');
+            updates[key] = value;
+          }
+          Object.assign(placement, updates); broadcast(); return reply(res, 200, placement);
+        }
+        if (url.pathname === '/api/cards' && req.method === 'GET') return reply(res, 200, { cards: cards.list() });
+        if (url.pathname === '/api/cards' && req.method === 'POST') {
+          if (Object.keys(body).some(key => !['content', 'tags', 'links', 'place'].includes(key))) throw new Error('Allowed fields: content, tags, links, place');
+          if (body.place !== undefined && typeof body.place !== 'boolean') throw new Error('place must be boolean');
+          const card = cards.create(body);
+          syncCardBoxPlacements(boxPlacements, cards.list());
+          if (body.place !== false) cardPlacements.set(card.id, { id: card.id, cardId: card.id, x: 0, y: 0, width: 340, height: 320 });
+          broadcast(); return reply(res, 201, card);
+        }
+        const cardMatch = url.pathname.match(/^\/api\/cards\/([^/]+)$/);
+        if (cardMatch) {
+          const id = cardMatch[1];
+          if (req.method === 'GET') return reply(res, 200, cards.get(id));
+          if (req.method === 'PATCH') {
+            if (Object.keys(body).some(key => !['content', 'tags', 'links'].includes(key))) throw new Error('Only content, tags and links are editable; ID is immutable');
+            const card = cards.update(id, body); broadcast(); return reply(res, 200, card);
+          }
+          if (req.method === 'DELETE') {
+            if (body.confirm !== true) throw new Error('Permanent deletion requires confirm: true');
+            cards.delete(id); cardPlacements.delete(id); boxPlacements.delete(id); broadcast(); return reply(res, 200, { ok: true });
+          }
+        }
+        const placeCard = url.pathname.match(/^\/api\/cards\/([^/]+)\/placement$/);
+        if (placeCard && req.method === 'POST') {
+          const card = cards.get(placeCard[1]);
+          if (Object.keys(body).length) throw new Error('Placement creation takes an empty object');
+          const placement = cardPlacements.get(card.id) || { id: card.id, cardId: card.id, x: 0, y: 0, width: 340, height: 320 };
+          cardPlacements.set(card.id, placement); broadcast(); return reply(res, 200, placement);
+        }
+        const placementMatch = url.pathname.match(/^\/api\/card-placements\/([^/]+)$/);
+        if (placementMatch && ['PATCH', 'DELETE'].includes(req.method)) {
+          const placement = cardPlacements.get(placementMatch[1]);
+          if (!placement) return reply(res, 404, { error: 'Card placement not found' });
+          if (req.method === 'DELETE') {
+            cardPlacements.delete(placement.id); broadcast(); return reply(res, 200, { ok: true });
+          }
+          const updates = {};
+          for (const [key, value] of Object.entries(body)) {
+            if (!['x', 'y', 'width', 'height'].includes(key) || !Number.isFinite(value) || (['width', 'height'].includes(key) && value < 240)) throw new Error('Invalid placement dimensions');
+            updates[key] = value;
+          }
+          Object.assign(placement, updates); broadcast(); return reply(res, 200, placement);
         }
         const sessionMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/session$/);
         if (sessionMatch && req.method === 'POST') {
@@ -375,6 +448,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
             return reply(res, 200, { ok: true });
           }
           if (!match[2] && req.method === 'DELETE') {
+            if (agent.workspace === 'card-box') return reply(res, 409, { error: 'Card box agent is fixed; resume instead of removing it' });
             if (agent.status !== 'stopped' || processes.has(agent.id)) {
               throw Object.assign(new Error('Stop the agent before removing it'), { status: 409 });
             }
@@ -447,16 +521,26 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     listen: async () => {
       unlock = lockCanvas(stateFile);
       let saved;
-      try { saved = loadCanvas(stateFile); } // Fail closed: never overwrite a corrupt save.
-      catch (error) { unlock(); throw error; }
+      try {
+        saved = loadCanvas(stateFile);
+        unlockCards = cardsFile === ':memory:' ? () => {} : lockCanvas(cardsFile);
+        cards = new CardStore(cardsFile);
+        cards.list(); // Validate the database before accepting requests.
+        await cards.backup();
+      } // Fail closed: never overwrite a corrupt save.
+      catch (error) { cards?.close(); unlockCards(); unlock(); throw error; }
       if (saved) {
         for (const agent of saved.agents) agents.set(agent.id, agent);
         for (const edge of saved.edges) edges.set(edge.id, edge);
         for (const note of saved.notes) notes.set(note.id, note);
+        const cardIds = new Set(cards.list().map(card => card.id));
+        for (const placement of saved.cardPlacements || []) if (cardIds.has(placement.cardId)) cardPlacements.set(placement.id, placement);
+        for (const placement of saved.cardBox?.placements || []) if (cardIds.has(placement.cardId)) boxPlacements.set(placement.id, placement);
       }
       try {
         await new Promise((resolveListen, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolveListen); });
-      } catch (error) { unlock(); throw error; }
+      } catch (error) { cards.close(); unlockCards(); unlock(); throw error; }
+      syncCardBoxPlacements(boxPlacements, cards.list());
       started = true;
       for (const agent of agents.values()) {
         if (agent.status !== 'running') { agent.status = 'stopped'; continue; }
@@ -475,6 +559,8 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
         wss.close();
         await stopProcesses();
         await new Promise(resolveClose => server.close(resolveClose));
+        cards?.close();
+        unlockCards();
         unlock();
       })();
       return closePromise;
@@ -483,9 +569,13 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
 }
 
 if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
-  const stateFile = resolve(process.env.AGENT_CANVAS_STATE_FILE || join(homedir(), '.agent-canvas', 'canvas.json'));
-  const app = createApp({ stateFile });
-  app.listen().then(() => console.log(`Agent Canvas API: http://127.0.0.1:${process.env.PORT || 3001}\nCanvas save: ${stateFile}`)).catch(error => { console.error(error.message); process.exit(1); });
+  let paths;
+  try { paths = storagePaths(); }
+  catch (error) { console.error('Cannot migrate Canvas data:', error.message); process.exit(1); }
+  const { stateFile, cardsFile, migrated } = paths;
+  if (migrated) console.log('Migrated data to ~/Documents/agent-canvas; originals retained in ~/.agent-canvas.');
+  const app = createApp({ stateFile, cardsFile });
+  app.listen().then(() => console.log(`Agent Canvas API: http://127.0.0.1:${process.env.PORT || 3001}\nCanvas save: ${stateFile}\nCard database: ${cardsFile}`)).catch(error => { console.error(error.message); process.exit(1); });
   process.on('SIGINT', () => app.close().then(() => process.exit(0)));
   process.on('SIGTERM', () => app.close().then(() => process.exit(0)));
 }

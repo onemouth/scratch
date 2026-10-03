@@ -1,0 +1,64 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+import { createApp } from './index.js';
+
+test('card API, placement persistence, removal, reset and permanent deletion', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'canvas-cards-'));
+  const stateFile = join(dir, 'canvas.json');
+  let app = createApp({ port: 0, stateFile });
+  const request = async (path, method = 'GET', body) => {
+    const response = await fetch('http://127.0.0.1:' + app.server.address().port + '/api' + path, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+    return { status: response.status, data: await response.json() };
+  };
+  try {
+    await app.listen();
+    const first = await request('/cards', 'POST', { content: '# 中文 hello', tags: ['test'] });
+    assert.equal(first.status, 201);
+    const id = first.data.id;
+    assert.match(id, /^\d{4}-\d{2}-\d{2}-0001$/);
+    assert.equal(app.snapshot().cardPlacements.length, 1);
+    assert.equal((await request('/cards/' + id, 'PATCH', { id: 'changed' })).status, 400);
+    assert.equal((await request('/cards/' + id, 'PATCH', { content: '中'.repeat(601) })).status, 400);
+    assert.equal((await request('/cards/' + id, 'PATCH', { content: 'Updated', tags: ['other'] })).status, 200);
+    assert.equal((await request('/card-placements/' + id, 'PATCH', { x: 99, width: 480 })).status, 200);
+    const invalid = await request('/card-placements/' + id, 'PATCH', { x: 500, height: 1 });
+    assert.equal(invalid.status, 400);
+    assert.equal(app.snapshot().cardPlacements[0].x, 99);
+    await app.close();
+    const saved = JSON.parse(await readFile(stateFile, 'utf8'));
+    assert.equal(saved.version, 2);
+    assert.equal(saved.cards, undefined);
+    assert.equal(saved.cardPlacements[0].x, 99);
+    app = createApp({ port: 0, stateFile });
+    await app.listen();
+    assert.equal(app.snapshot().cards[0].content, 'Updated');
+    assert.equal(app.snapshot().cardPlacements[0].width, 480);
+    await request('/card-placements/' + id, 'DELETE', {});
+    assert.equal(app.snapshot().cardPlacements.length, 0);
+    assert.equal((await request('/cards/' + id)).status, 200);
+    await request('/cards/' + id + '/placement', 'POST', {});
+    await request('/canvas/reset', 'POST', { confirm: true });
+    assert.equal(app.snapshot().cardPlacements.length, 0);
+    assert.equal((await request('/cards')).data.cards.length, 1);
+    assert.equal((await request('/cards/' + id, 'DELETE', {})).status, 400);
+    assert.equal((await request('/cards/' + id, 'DELETE', { confirm: true })).status, 200);
+    assert.equal((await request('/cards/' + id)).status, 404);
+    const second = await request('/cards', 'POST', { content: '', place: false });
+    assert.ok(second.data.id.endsWith('-0002'));
+    assert.equal(app.snapshot().cardPlacements.length, 0);
+    await app.close();
+    app = createApp({ port: 0, stateFile });
+    await app.listen();
+    assert.equal(app.snapshot().cards.length, 1);
+    assert.equal(app.snapshot().cardPlacements.length, 0);
+    const third = await request('/cards', 'POST', { content: 'Linked', links: [second.data.id], place: false });
+    assert.equal(third.status, 201);
+    assert.deepEqual(third.data.links, [second.data.id]);
+    assert.equal((await request('/cards/' + third.data.id, 'PATCH', { links: [third.data.id] })).status, 400);
+    assert.equal((await request('/cards/' + third.data.id, 'PATCH', { links: [] })).status, 200);
+    assert.deepEqual((await request('/cards/' + third.data.id)).data.links, []);
+  } finally { await app.close(); await rm(dir, { recursive: true, force: true }); }
+});

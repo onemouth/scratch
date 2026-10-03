@@ -102,6 +102,34 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .guide-footer { display: flex; align-items: center; justify-content: space-between; gap: 16px; padding-top: 16px; flex: none; font-size: 12px; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
 .modal-actions button:not(.primary) { color: #bbc8df; border: 0; background: none; padding: 10px; }
+.zettel-card { height: 100%; display: flex; flex-direction: column; background: #e5e8fa; color: #202a40; border: 1px solid #adb8d2; border-radius: 8px; overflow: hidden; }
+.card-drag-handle { display: flex; justify-content: flex-end; align-items: center; padding: 5px 9px; font-size: 11px; cursor: grab; background: #d2d9ef; }
+.card-drag-handle button, .card-toolbar button { border: 0; background: transparent; color: inherit; border-radius: 4px; }
+.card-toolbar button:hover { background: #bac5e0; }
+.card-toolbar .card-icon { width: 18px; height: 18px; padding: 0; display: grid; place-items: center; flex: none; cursor: pointer; }
+.card-icon svg { width: 13px; height: 13px; }
+.card-icon:focus-visible { outline: 2px solid #245b9c; outline-offset: 2px; }
+.card-face { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; font-size: 14px; }
+.card-toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 4px; min-height: 26px; padding: 4px 8px; border-bottom: 1px solid #bec8df; font-size: 11px; flex: none; }
+.card-body { flex: 1; min-height: 0; overflow: auto; }
+.card-body textarea { width: 100%; height: 100%; min-height: 120px; padding: 12px; border: 0; outline: none; resize: none; background: #f2f4fc; color: #202a40; font-family: ui-monospace, monospace; font-size: inherit; }
+.card-markdown, .card-meta { padding: 0 12px; overflow-wrap: anywhere; line-height: 1.5; }
+.card-markdown pre { overflow: auto; background: #d4dcef; padding: 8px; }
+.card-markdown a { color: #245b9c; }
+.card-markdown p:first-child { margin-top: 10px; }
+.card-meta dt { font-weight: 600; font-size: inherit; margin-top: 12px; }
+.card-meta dd { margin: 6px 0; }
+.card-meta input { width: 100%; padding: 7px; border: 1px solid #adb8d2; border-radius: 4px; background: #f2f4fc; color: #202a40; }
+.card-tag { display: inline-block; padding: 2px 6px; margin: 2px; background: #cad4ec; border-radius: 4px; }
+.card-count { padding: 4px 12px; font-size: 10px; color: #55627c; flex: none; }
+.card-count.invalid { color: #a12323; }
+.card-footer { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: none; }
+.card-footer > [role=status] { min-width: 0; overflow-wrap: anywhere; }
+.card-footer .card-delete { flex: none; }
+.card-delete { align-self: center; font-size: 9px; background: transparent; color: #7c4350; border: 0; padding: 4px 8px; }
+.react-flow__node-card .react-flow__resize-control { z-index: 3; }
+.react-flow__node-card .react-flow__resize-control.handle { width: 14px; height: 14px; border-radius: 3px; }
+.react-flow__node-card .react-flow__resize-control.handle::after { content: ''; position: absolute; inset: -6px; }
 .toast { position: absolute; right: 24px; bottom: 24px; background: #583135; color: #fff; border-radius: 8px; padding: 12px 16px; z-index: 20; cursor: pointer; }
 @media (max-width: 900px) { .brand small, .connection { display: none; } }
 @media (max-width: 640px) { .topbar { padding: 0 8px; } .top-actions { gap: 4px; } .topbar .primary, .topbar .guide-button { padding: 4px; font-size: 9px; } }

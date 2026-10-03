@@ -4,7 +4,8 @@ import { randomUUID } from 'node:crypto';
 
 export function validateCanvas(value) {
   const fail = () => { throw new Error('Invalid or unsupported Canvas save file'); };
-  if (!value || value.version !== 1) fail();
+  if (!value || ![1, 2].includes(value.version)) fail();
+  if (value.version === 2 && !Array.isArray(value.cardPlacements)) fail();
   const ids = new Set();
   for (const kind of ['agents', 'notes', 'edges']) {
     if (!Array.isArray(value[kind])) fail();
@@ -17,6 +18,21 @@ export function validateCanvas(value) {
       if (kind === 'agents' && item.sessionFile != null && typeof item.sessionFile !== 'string') fail();
       if (kind === 'notes' && (typeof item.text !== 'string' || typeof item.title !== 'string')) fail();
       if (kind === 'edges' && (item.type !== 'delegates' || typeof item.label !== 'string')) fail();
+    }
+  }
+  const cardIds = new Set();
+  for (const placement of value.cardPlacements || []) {
+    if (!placement || typeof placement.id !== 'string' || typeof placement.cardId !== 'string' || placement.id !== placement.cardId || !/^\d{4}-\d{2}-\d{2}-\d{4,}$/.test(placement.cardId) || ids.has(placement.id) || cardIds.has(placement.cardId)) fail();
+    if (!['x', 'y', 'width', 'height'].every(key => Number.isFinite(placement[key])) || placement.width < 240 || placement.height < 240) fail();
+    ids.add(placement.id); cardIds.add(placement.cardId);
+  }
+  if (value.agents.some(agent => agent.workspace !== undefined && !['agents', 'card-box'].includes(agent.workspace)) || value.agents.filter(agent => agent.workspace === 'card-box').length > 1) fail();
+  if (value.cardBox !== undefined) {
+    if (!value.cardBox || !Array.isArray(value.cardBox.placements)) fail();
+    const placements = new Set();
+    for (const p of value.cardBox.placements) {
+      if (!p || p.id !== p.cardId || typeof p.id !== 'string' || !/^\d{4}-\d{2}-\d{2}-\d{4,}$/.test(p.id) || placements.has(p.id) || !['x', 'y', 'width', 'height'].every(key => Number.isFinite(p[key])) || p.width < 240 || p.height < 240) fail();
+      placements.add(p.id);
     }
   }
   const agents = new Set(value.agents.map(agent => agent.id));
@@ -57,7 +73,7 @@ export function loadCanvas(file) {
 
 export function saveCanvas(file, state) {
   if (!file) return;
-  const value = validateCanvas({ ...state, version: 1 });
+  const value = validateCanvas({ ...state, cardPlacements: state.cardPlacements || [], version: 2 });
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.tmp`;
   const fd = openSync(temporary, 'w', 0o600);
