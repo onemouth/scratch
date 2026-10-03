@@ -45,7 +45,7 @@ Test card creation, content/metadata editing and flipping, debounced auto-save, 
 - `server/index.test.js` — API lifecycle, saved-session workdirs, delegation, explicit TTY messaging, terminal I/O and guide URL tests using a fake PTY.
 - `server/card-store.js` — SQLite cards, schema version, daily sequences, startup backup.
 - `server/cards.test.js`, `server/card-store.test.js` — isolated card API, persistence and backup tests.
-- `shared/card-content.js` — shared Markdown validation and 600-unit counter.
+- `shared/card-content.js` — shared Markdown validation and 400-unit counter.
 - `src/cards.jsx` — front/back editable cards shared by both workspace modes.
 - `server/card-box-layout.js`, `server/card-box.test.js` — append-only grid placement and fixed-agent/layout lifecycle tests.
 - `src/main.jsx` — canvas and terminal browser UI.

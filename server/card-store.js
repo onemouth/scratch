@@ -2,7 +2,7 @@ import { DatabaseSync, backup } from 'node:sqlite';
 import { mkdirSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { validateCardLinks } from '../shared/card-links.js';
-import { validateCardContent } from '../shared/card-content.js';
+import { inspectCardContent, validateCardContent } from '../shared/card-content.js';
 
 export function validateTags(tags) {
   if (!Array.isArray(tags) || tags.length > 30 || tags.some(tag => typeof tag !== 'string' || !tag.trim() || [...tag.trim()].length > 60 || /[,\n\r]/.test(tag))) throw new Error('tags must be an array of up to 30 non-empty strings, each at most 60 characters, without commas/newlines');
@@ -38,7 +38,7 @@ export class CardStore {
   }
   decode(row) {
     if (!row) throw Object.assign(new Error('Card not found'), { status: 404 });
-    return { id: row.id, content: row.content, tags: JSON.parse(row.tags), links: validateCardLinks(JSON.parse(row.links)), units: validateCardContent(row.content), createdAt: row.created_at, updatedAt: row.updated_at };
+    return { id: row.id, content: row.content, tags: JSON.parse(row.tags), links: validateCardLinks(JSON.parse(row.links)), units: inspectCardContent(row.content), createdAt: row.created_at, updatedAt: row.updated_at };
   }
   list() { return this.db.prepare('SELECT * FROM cards ORDER BY substr(id,1,10) DESC, CAST(substr(id,12) AS INTEGER) DESC').all().map(row => this.decode(row)); }
   get(id) { return this.decode(this.db.prepare('SELECT * FROM cards WHERE id=?').get(id)); }

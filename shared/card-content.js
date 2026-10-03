@@ -5,7 +5,7 @@ const parser = unified().use(remarkParse);
 const words = new Intl.Segmenter('en', { granularity: 'word' });
 const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
 const cjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
-export const CARD_LIMIT = 600;
+export const CARD_LIMIT = 400;
 
 // Count rendered text, never Markdown syntax or link destinations.
 export function inspectCardContent(content) {
@@ -31,6 +31,6 @@ export function inspectCardContent(content) {
 }
 export function validateCardContent(content) {
   const units = inspectCardContent(content);
-  if (units > CARD_LIMIT) throw new Error('content exceeds 600 text units (CJK characters + English words)');
+  if (units > CARD_LIMIT) throw new Error(`content exceeds ${CARD_LIMIT} text units (CJK characters + English words)`);
   return units;
 }

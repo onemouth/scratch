@@ -10,12 +10,12 @@ test('counts CJK characters and English words, not Markdown formatting', () => {
   assert.equal(inspectCardContent('か\u3099'), 1);
   assert.equal(inspectCardContent('> hello\n\n- world\n\n`some code`'), 4);
 });
-test('600-unit boundaries and text-only Markdown', () => {
-  assert.equal(validateCardContent('中'.repeat(600)), 600);
-  assert.equal(validateCardContent('word '.repeat(600)), 600);
-  assert.equal(validateCardContent('中'.repeat(300) + ' word'.repeat(300)), 600);
-  assert.throws(() => validateCardContent('中'.repeat(601)), /600/);
-  assert.throws(() => validateCardContent('word '.repeat(601)), /600/);
+test('400-unit boundaries and text-only Markdown', () => {
+  assert.equal(validateCardContent('中'.repeat(400)), 400);
+  assert.equal(validateCardContent('word '.repeat(400)), 400);
+  assert.equal(validateCardContent('中'.repeat(200) + ' word'.repeat(200)), 400);
+  assert.throws(() => validateCardContent('中'.repeat(401)), /400/);
+  assert.throws(() => validateCardContent('word '.repeat(401)), /400/);
   for (const content of ['![x](image.png)', '<div>raw</div>', '![x][ref]\n\n[ref]: image.png']) assert.throws(() => validateCardContent(content), /text Markdown/);
   assert.throws(() => validateCardContent(' '.repeat(20001)), /source/);
 });

@@ -21,7 +21,7 @@ test('card API, placement persistence, removal, reset and permanent deletion', a
     assert.match(id, /^\d{4}-\d{2}-\d{2}-0001$/);
     assert.equal(app.snapshot().cardPlacements.length, 1);
     assert.equal((await request('/cards/' + id, 'PATCH', { id: 'changed' })).status, 400);
-    assert.equal((await request('/cards/' + id, 'PATCH', { content: '中'.repeat(601) })).status, 400);
+    assert.equal((await request('/cards/' + id, 'PATCH', { content: '中'.repeat(401) })).status, 400);
     assert.equal((await request('/cards/' + id, 'PATCH', { content: 'Updated', tags: ['other'] })).status, 200);
     assert.equal((await request('/card-placements/' + id, 'PATCH', { x: 99, width: 480 })).status, 200);
     const invalid = await request('/card-placements/' + id, 'PATCH', { x: 500, height: 1 });

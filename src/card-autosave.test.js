@@ -15,7 +15,7 @@ test('debounces drafts, blocks invalid content, and retries failed writes', asyn
     await sleep(30);
     assert.deepEqual(writes, [{ content: 'latest', tags: ['tag'], links: [] }]);
     assert.equal(states.at(-1).state, 'saved');
-    saver.update('中'.repeat(601), '');
+    saver.update('中'.repeat(401), '');
     await sleep(20);
     assert.equal(writes.length, 1);
     assert.equal(states.at(-1).state, 'error');
