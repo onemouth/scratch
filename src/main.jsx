@@ -264,7 +264,14 @@ function Canvas() {
           if (document.hasFocus() && activeNode?.getAttribute('data-id') === agent.id) continue;
           try {
             const notification = new Notification('Agent finished · Agent Canvas', { body: agent.name, tag: `agent-canvas:${agent.id}` });
-            notification.onclick = () => { window.focus(); setMaximizedId(null); focusAgent(agent.id); notification.close(); };
+            notification.onclick = () => {
+              window.focus();
+              // Keep maximized mode when navigating from a notification.
+              setMaximizedId(current => current ? agent.id : null);
+              setMaximizeFocus(n => n + 1);
+              focusAgent(agent.id);
+              notification.close();
+            };
           } catch { /* Browser notification service may be unavailable. */ }
         }
       }
