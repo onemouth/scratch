@@ -60,8 +60,8 @@ export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = fal
 }
 export function CardNode({ id, data, selected }) {
   const { zoom } = useViewport();
-  // Match sticky-note sizing: scale with the paper, never below 14 screen px.
-  const fontSize = Math.max(16, 14 / zoom);
+  // Scale with the paper, never below 11 screen px.
+  const fontSize = Math.max(13, 11 / zoom);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
   const add = async () => {
