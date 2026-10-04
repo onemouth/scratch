@@ -1,10 +1,10 @@
 # Agent Canvas — Agent API Guide
 
-You can use the Agent Canvas API to observe the shared canvas, create Pi agents, send explicit messages to running agents, and record **real delegation relationships**. Run these HTTP commands with your shell/bash tool. This server is local to the user's machine; do not expose it to the network.
+You can use the Agent Canvas API to observe the shared canvas, create Pi agents, send explicit messages to running agents, and record **real delegation relationships**. Run these HTTP commands with your shell/bash tool. This server binds to loopback on the user's machine. Optional private Tailscale Serve access is configured by the human; do not change network exposure, Serve/Funnel or access policies as part of Canvas API work.
 
 ## Locate the server and your identity
 
-- This web guide substitutes the **current running API URL** into every command below, so you can copy it into an agent as-is. The server listens on the same machine at `127.0.0.1`; pasted commands will not work on a different machine.
+- This web guide substitutes the **current running API URL** into every command below, so you can copy it into an agent as-is. Canvas-launched agents use the same-machine `127.0.0.1` API URL. A browser-facing guide can instead show the human's explicitly configured HTTPS tailnet URL; those commands require a permitted Tailscale device. Never replace a Canvas agent's loopback URL with the browser URL.
 - Canvas-launched agents receive the `agent-canvas` skill via Pi's `--skill` option and have `AGENT_CANVAS_URL` and `AGENT_CANVAS_ID` (their own node ID) in their environment. The skill points to this live guide; it does not install anything globally.
 - If this guide was pasted into a different agent, tell it whether it has a Canvas node, and provide that node's ID if so. **Do not assume an external agent already has a node**: agents not launched by the Canvas do not have `AGENT_CANVAS_ID`.
 - Canvas-launched agents can also fetch this guide: `curl -fsS "$AGENT_CANVAS_URL/api/docs"`.
@@ -35,7 +35,7 @@ Validation errors return 400; absent cards/placements return 404. Only create or
 
 ## Card attachments (human UI)
 
-Each card has at most one image and one audio. `image` and `audio` are either `null` or `{id, kind, name, mime, size, createdAt, url}`. `name` is the original filename; `size` is bytes; `url` is a localhost-relative `/api/card-files/:id` URL, not an external URL or filesystem path. Attachments are independent of Markdown and do not count toward 400 text units. Normal card POST/PATCH cannot set these fields.
+Each card has at most one image and one audio. `image` and `audio` are either `null` or `{id, kind, name, mime, size, createdAt, url}`. `name` is the original filename; `size` is bytes; `url` is a same-origin relative `/api/card-files/:id` URL, not an external URL or filesystem path. Attachments are independent of Markdown and do not count toward 400 text units. Normal card POST/PATCH cannot set these fields.
 
 The browser supports dragging JPEG/PNG/WebP/GIF (10 MB) or MP3/M4A/WAV/OGG (50 MB) onto a card, not empty Canvas. It renders audio → image → text; metadata includes unlink controls. Switching Canvas preserves playback, and only one audio plays at a time.
 
@@ -160,4 +160,4 @@ The internal `POST /api/agents/:id/session` and `POST /api/agents/:id/activity` 
 - `WS /api/terminal/:id` streams PTY output and accepts raw terminal input and resize messages (used by the web UI). Prefer `POST /api/messages` for explicit agent-to-agent messages.
 - `POST /api/agents/:id/stop` terminates a Pi process. `DELETE /api/agents/:id` removes a **stopped** node and its relationships from this canvas, but does not delete its saved Pi session. Don't stop or remove another agent unless explicitly asked.
 - Calls return JSON; failures return `{ "error": "..." }` with a non-2xx HTTP status. `curl -f` treats these as errors.
-- There is **no automatic message passing** and no authentication. A single local Canvas is auto-saved; restoration reopens conversations, not in-flight tasks. Use the API only against the local server and record relationships only for actual work.
+- There is **no automatic message passing** and no authentication. A single local Canvas is auto-saved; restoration reopens conversations, not in-flight tasks. Use the API only against the user's configured Canvas server and record relationships only for actual work. Canvas-launched agents must keep using their supplied loopback URL.

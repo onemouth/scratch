@@ -17,6 +17,27 @@ Use the single mouse/touchpad icon button beneath the bottom-left zoom controls 
 
 Use **＋ Note** to add a yellow sticky note. Notes display only their body text, with no title. Drag only the paper's top edge to move it, resize the note when selected, and edit its text directly (saved when the editor loses focus). Text scales with the canvas while staying at least 14 screen pixels for readability. Hover over the note to reveal **×** in the top-right corner and delete it (also available with keyboard focus or on touch devices). Notes are independent of agents and are saved with the Canvas.
 
+## Private Tailscale access (optional)
+
+The backend still binds only to `127.0.0.1`; use **Tailscale Serve** for HTTPS access from permitted tailnet devices. This is **not application authentication**: anyone allowed to reach the proxy can control terminals and access files as your OS account. Restrict access to your own user/devices using Tailscale grants/ACLs. Never use Funnel or expose Canvas to the public internet.
+
+With Tailscale installed and connected:
+
+```sh
+npm run tailscale:setup             # read-only inspection; prints hostname and commands
+npm run tailscale:setup -- --apply  # explicitly enable tailnet-only HTTPS proxy
+# Use the exact hostname printed by setup:
+AGENT_CANVAS_PUBLIC_ORIGIN=https://your-machine.your-tailnet.ts.net npm run dev
+```
+
+Use **dev mode only** for this flow: Serve proxies `127.0.0.1:5173` (Vite), which forwards `/api` and terminal WebSockets to the loopback backend on port 3001. No build step or `npm start` is needed. Stop your existing dev process safely before restarting it with the setting; the script never restarts it or changes data/agents. Tailscale may prompt you to authorize HTTPS in your tailnet. Open the printed HTTPS URL, not the raw 100.x IP. Vite modules/HMR, API, SSE, attachments and terminal WebSockets use the same proxy; HTTPS enables secure-context browser features such as notifications.
+
+The single `AGENT_CANVAS_PUBLIC_ORIGIN` must be an HTTPS origin (no credentials, paths, query, fragment or wildcard). It is added to the existing localhost browser-origin allowlist for HTTP and WebSocket requests. No forwarded Host/header is trusted to expand that list. Local Pi agents continue using their loopback API URL. With this setting absent, public browser origins remain rejected.
+
+Serve persists across reboots; **Canvas must still be running with the origin setting on each start**. The script does not write an .env file, configure login startup, change access policies, or enable Funnel. It refuses conflicting existing Serve/Funnel/foreground/Service configuration rather than overwriting or resetting it; an exactly matching proxy is left unchanged. To inspect: `tailscale serve status`. To disable this port's proxy: `tailscale serve --https=443 off` (do not use reset, which clears other Serve configurations).
+
+The script finds `tailscale` on PATH or the bundled macOS CLI at `/Applications/Tailscale.app/Contents/MacOS/Tailscale`, using `TAILSCALE_BE_CLI=1`. You can set `TAILSCALE_BIN=/absolute/path/to/cli`. Serve always targets Vite port 5173; `--port`/production options are not supported. Vite uses strict port selection, so a busy 5173 causes an error instead of silently using 5174. Only the configured HTTPS hostname is explicitly allowed (not `allowedHosts: true`); HMR automatically uses ws:// locally and wss:// through the HTTPS proxy. If you explicitly set a different backend `PORT`, both backend and Vite's API proxy use it, but Serve still targets 5173. HTTPS Serve remains on port 443. Check setup's `--help` for usage.
+
 ## Card box (MVP)
 
 Use **＋ Card** to create a separate Markdown card on the Canvas; sticky notes are unchanged. Cards have no title. The front renders Markdown; **Edit** opens the source editor; valid content and tags auto-save about 500 ms after typing stops. **Done** returns to reading without discarding the draft. A small status shows Saving / Saved / Not saved, with Retry on write failures. **Metadata ↷** flips to the immutable ID, editable comma-separated tags and **Links** (other card IDs, separated by commas or whitespace). Links auto-save with content/tags; metadata does not count toward the 400-unit content limit. Flip back with **Content ↶**. Drag the card header and resize selected cards. Canvas card content, metadata and editor text use a 13px base font that scales with the Canvas, with an 11-screen-pixel minimum when zoomed out. Sticky notes retain their 14-screen-pixel minimum. In Agent Canvas, **×** removes only its Canvas placement; **Delete permanently…** requires confirmation and removes the card from the library too.
@@ -54,7 +75,7 @@ On restart, previously running nodes automatically reopen their exact Pi convers
 ## Documentation
 
 - [Architecture](docs/architecture.md) — processes, canvas state, PTY streaming, lifecycle and boundaries.
-- [Agent API Guide](docs/agent-api.md) — copyable instructions for agents; also available in the browser via **API Guide** or `GET /api/docs`. The web version fills in the correct browser-facing localhost URL. Canvas-launched Pi agents automatically receive the [agent-canvas skill](skills/agent-canvas/SKILL.md), which points them to the current full guide on the running server.
+- [Agent API Guide](docs/agent-api.md) — copyable instructions for agents; also available in the browser via **API Guide** or `GET /api/docs`. The web version fills in the correct explicitly allowed browser-facing URL. Canvas-launched Pi agents automatically receive the [agent-canvas skill](skills/agent-canvas/SKILL.md), which points them to the current full guide on the running server.
 - [Development](docs/development.md) — installation, ports, tests and source map.
 
-For a single-server production-style run: `npm run build && npm start`, then open http://127.0.0.1:3001. Do not expose this unauthenticated local service to a network.
+Use `npm run dev` for the current local/Tailscale workflow. Do not expose this unauthenticated service to the public internet or LAN; optional private tailnet access is described above.

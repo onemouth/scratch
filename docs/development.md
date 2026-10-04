@@ -16,7 +16,9 @@ npm run build
 npm start         # serves built app and API together on http://127.0.0.1:3001
 ```
 
-Vite proxies `/api` (including the terminal WebSocket) to the Node server in development. If you change the API port, update both `PORT` for the server and the proxy target in `vite.config.js`. Avoid running `npm start` and `npm run dev` simultaneously on port 3001.
+Vite proxies `/api` (including the terminal WebSocket) to the Node server in development. If you change the API port, set `PORT` for `npm run dev`; both backend and Vite's proxy target read it. Vite uses fixed strict port 5173. Avoid running `npm start` and `npm run dev` simultaneously on port 3001.
+
+For optional private tailnet **dev-mode** access (Serve → Vite 5173 → /api backend), see [README](../README.md#private-tailscale-access-optional). `npm run tailscale:setup` only inspects and prints a plan; `--apply` mutates Serve and must be run explicitly by the user after checking access policies. Do not apply/reset a real Tailscale configuration during automated tests. Unit tests use injected CLI responses and fake PTYs to cover fail-closed setup, HTTP/WS origin enforcement, guide URLs and loopback agent URLs. For an HTTPS proxy smoke test, use isolated state/cards, a loopback test proxy and fake PTYs; verify HMR without page reload, local and remote Vite access, SSE, WSS input/output and attachment requests without invoking real models or modifying live data.
 
 For a manual end-to-end check: choose a saved Pi session folder from the workdir dropdown (or enter one manually), then create an Agent in the browser; confirm its empty Pi TUI appears, type a simple task into the terminal, check resizing, create an edge and edit its label, check the Guide's copied URL and that Stop leaves the node visible. Remove the stopped node and check that its edges disappear, then try **Resume · pi -r** in the same workdir and choose that saved Pi session. Sending a task invokes your configured model; the automated tests do not.
 
@@ -39,6 +41,9 @@ Media checks: use isolated data. Test real file drops in both modes, image+audio
 ## Source map
 
 - `server/index.js` — live state, auto-save/restore orchestration, validation, Pi PTYs, HTTP/SSE/WebSocket, static production assets, served API guide.
+- `vite.config.js`, `server/dev-config.test.js` — strict loopback dev port, exact trusted Vite hostname and API/WS proxy configuration.
+- `server/public-origin.js`, `server/public-origin.test.js` — exact opt-in HTTPS origin validation and HTTP/WebSocket policy tests.
+- `scripts/tailscale-setup.js`, `scripts/tailscale-setup.test.js` — read-only planning, explicit Serve setup and existing-configuration safeguards.
 - `server/storage-paths.js` — Documents data defaults and stopped-server legacy migration.
 - `server/canvas-store.js` — snapshot validation, atomic save and previous-save backup.
 - `server/pi-session-tracker.js` — Pi lifecycle extension reporting exact conversation identity and turn activity.

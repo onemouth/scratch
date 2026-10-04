@@ -8,6 +8,7 @@
     "dev": "concurrently -k \"node server/index.js\" \"vite --host 127.0.0.1\"",
     "build": "vite build",
     "start": "node server/index.js",
+    "tailscale:setup": "node scripts/tailscale-setup.js",
     "test": "node --test"
   },
   "dependencies": {

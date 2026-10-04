@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { parsePublicOrigin } from './public-origin.js';
 import { initializeMedia, storeMediaUpload, serveMedia } from './card-media-store.js';
 import { CardStore } from './card-store.js';
 import { syncCardBoxPlacements } from './card-box-layout.js';
@@ -56,8 +57,10 @@ async function savedWorkdirs(sessionRoot) {
 }
 
 export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = pty.spawn, stateFile = null, cardsFile = stateFile ? stateFile + '.cards.sqlite' : ':memory:',
+  publicOrigin = process.env.AGENT_CANVAS_PUBLIC_ORIGIN,
   mediaDirectory = cardsFile === ':memory:' ? null : dirname(resolve(cardsFile)),
   sessionsRoot = process.env.PI_CODING_AGENT_SESSION_DIR || join(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'), 'sessions') } = {}) {
+  const trustedPublicOrigin = parsePublicOrigin(publicOrigin);
   const agents = new Map();
   const processes = new Map();
   const edges = new Map();
@@ -249,7 +252,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     res.writeHead(status, { 'Content-Type': 'application/json; charset=utf-8', 'Cache-Control': 'no-store' });
     res.end(JSON.stringify(value));
   };
-  const allowedOrigin = (origin) => !origin || [`http://127.0.0.1:${server.address()?.port || port}`, 'http://127.0.0.1:5173'].includes(origin);
+  const allowedOrigin = (origin) => !origin || [`http://127.0.0.1:${server.address()?.port || port}`, 'http://127.0.0.1:5173', trustedPublicOrigin].includes(origin);
   const handler = async (req, res) => {
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
     if (!allowedOrigin(req.headers.origin)) return reply(res, 403, { error: 'Cross-origin requests are not allowed' });
@@ -269,7 +272,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       const backendUrl = `http://127.0.0.1:${server.address().port}`;
       // The web UI passes its own origin, since Vite may rewrite Host when proxying.
       const requestedOrigin = url.searchParams.get('origin');
-      const canvasUrl = requestedOrigin === 'http://127.0.0.1:5173' ? requestedOrigin : backendUrl;
+      const canvasUrl = requestedOrigin && allowedOrigin(requestedOrigin) ? requestedOrigin : backendUrl;
       const guide = readFileSync(apiGuide, 'utf8').replaceAll('$AGENT_CANVAS_URL', canvasUrl);
       res.writeHead(200, { 'Content-Type': 'text/markdown; charset=utf-8', 'Cache-Control': 'no-store' });
       res.end(guide);
