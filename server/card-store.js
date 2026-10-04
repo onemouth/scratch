@@ -2,6 +2,8 @@ import { DatabaseSync, backup } from 'node:sqlite';
 import { mkdirSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { validateCardLinks } from '../shared/card-links.js';
+import { MEDIA, MEDIA_ID } from '../shared/card-media.js';
+import { publicMediaFile, validateMediaFile } from './card-media-store.js';
 import { inspectCardContent, validateCardContent } from '../shared/card-content.js';
 
 export function validateTags(tags) {
@@ -19,8 +21,8 @@ export class CardStore {
     try {
       if (file !== ':memory:') chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 3) throw new Error('Unsupported card database version');
-      this.db.exec('PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
+      if (version > 4) throw new Error('Unsupported card database version');
+      this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
         CREATE TABLE cards (id TEXT PRIMARY KEY, content TEXT NOT NULL, tags TEXT NOT NULL, created_at TEXT NOT NULL, updated_at TEXT NOT NULL);
@@ -46,14 +48,58 @@ export class CardStore {
           this.db.exec('PRAGMA user_version=3; COMMIT;');
         } catch (error) { this.db.exec('ROLLBACK'); throw error; }
       }
+      if (version < 4) this.db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE IF NOT EXISTS card_files (
+          id TEXT PRIMARY KEY, kind TEXT NOT NULL, name TEXT NOT NULL,
+          mime TEXT NOT NULL, size INTEGER NOT NULL, filename TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL
+        );
+        CREATE TABLE IF NOT EXISTS card_media (
+          card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE,
+          image_id TEXT REFERENCES card_files(id), audio_id TEXT REFERENCES card_files(id)
+        );
+        PRAGMA user_version=4;
+        COMMIT;
+      `);
     } catch (error) { this.db.close(); throw error; }
   }
   decode(row) {
     if (!row) throw Object.assign(new Error('Card not found'), { status: 404 });
-    return { id: row.id, content: row.content, tags: JSON.parse(row.tags), links: validateCardLinks(JSON.parse(row.links)), units: inspectCardContent(row.content), createdAt: row.created_at, updatedAt: row.updated_at };
+    return { id: row.id, content: row.content, tags: JSON.parse(row.tags), links: validateCardLinks(JSON.parse(row.links)), units: inspectCardContent(row.content), ...this.cardMedia(row.id), createdAt: row.created_at, updatedAt: row.updated_at };
   }
   list() { return this.db.prepare('SELECT * FROM cards ORDER BY substr(id,1,10) DESC, CAST(substr(id,12) AS INTEGER) DESC').all().map(row => this.decode(row)); }
   get(id) { return this.decode(this.db.prepare('SELECT * FROM cards WHERE id=?').get(id)); }
+  mediaFile(id) {
+    const row = this.db.prepare('SELECT * FROM card_files WHERE id=?').get(id);
+    if (!row) throw Object.assign(new Error('Attachment not found'), { status: 404 });
+    return validateMediaFile({ id: row.id, kind: row.kind, name: row.name, mime: row.mime, size: row.size, filename: row.filename, createdAt: row.created_at });
+  }
+  cardMedia(id) {
+    const row = this.db.prepare('SELECT image_id, audio_id FROM card_media WHERE card_id=?').get(id);
+    return { image: row?.image_id ? publicMediaFile(this.mediaFile(row.image_id)) : null, audio: row?.audio_id ? publicMediaFile(this.mediaFile(row.audio_id)) : null };
+  }
+  assertMediaSlot(id, kind, expected) {
+    if (!MEDIA[kind] || (expected !== null && (typeof expected !== 'string' || !MEDIA_ID.test(expected)))) throw new Error('Invalid attachment slot or expected ID');
+    this.get(id);
+    const current = this.db.prepare(`SELECT ${kind}_id AS id FROM card_media WHERE card_id=?`).get(id)?.id ?? null;
+    if (current !== expected) throw Object.assign(new Error('Attachment changed; refresh and confirm replacement again'), { status: 409 });
+  }
+  setMedia(id, kind, file, expected = null) {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.assertMediaSlot(id, kind, expected);
+      const timestamp = this.now().toISOString();
+      if (file) {
+        validateMediaFile(file);
+        if (file.kind !== kind) throw new Error('Attachment kind mismatch');
+        this.db.prepare('INSERT INTO card_files (id,kind,name,mime,size,filename,created_at) VALUES (?,?,?,?,?,?,?)').run(file.id, file.kind, file.name, file.mime, file.size, file.filename, file.createdAt);
+      }
+      this.db.prepare(`INSERT INTO card_media (card_id,${kind}_id) VALUES (?,?) ON CONFLICT(card_id) DO UPDATE SET ${kind}_id=excluded.${kind}_id`).run(id, file?.id ?? null);
+      this.db.prepare('UPDATE cards SET updated_at=? WHERE id=?').run(timestamp, id);
+      this.db.exec('COMMIT');
+      return this.get(id);
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
   checkLinks(links, selfId, previous = []) {
     const values = validateCardLinks(links);
     for (const id of values) {

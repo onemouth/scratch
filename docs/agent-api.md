@@ -20,7 +20,7 @@ Returns `{ "agents": [...], "edges": [...], "notes": [...], "cards": [...], "car
 
 ## Card box
 
-Cards are independent of sticky notes. Read all cards with `GET /api/cards` (returns `{cards: [...]}`, newest ID first), or one with `GET /api/cards/:id`. A card contains `id`, `content`, `tags`, `links`, `units`, `createdAt`, and `updatedAt`. IDs are assigned by the server from its local date plus a daily non-reused sequence (`YYYY-MM-DD-0001`) and cannot be changed.
+Cards are independent of sticky notes. Read all cards with `GET /api/cards` (returns `{cards: [...]}`, newest ID first), or one with `GET /api/cards/:id`. A card contains `id`, `content`, `tags`, `links`, `units`, nullable `image`/`audio` attachment metadata, `createdAt`, and `updatedAt`. IDs are assigned by the server from its local date plus a daily non-reused sequence (`YYYY-MM-DD-0001`) and cannot be changed.
 
 - `POST /api/cards`: `{"content":"**One idea**","tags":["reading"],"links":["<EXISTING_CARD_ID>"],"place":true}`. Returns the card (201). All fields are optional; defaults are empty content/tags/links and `place:true`. With `place:false`, the card has no Agent Canvas node, but still appears automatically in Card box.
 - `PATCH /api/cards/:id`: update only `content`, `tags` and/or `links`; returns the updated card. Updates are atomic; invalid content, tags or links change nothing.
@@ -32,6 +32,19 @@ Cards are independent of sticky notes. Read all cards with `GET /api/cards` (ret
 Content supports text Markdown (headings, emphasis, lists, blockquotes, code, normal links), not images or raw HTML. Limit: **400 text units**, CJK graphemes individually plus non-CJK words using Unicode word segmentation. Formatting, whitespace, punctuation and link destinations do not count. Code counts as text. Source is limited to 20,000 characters. Tags are a flat array of at most 30 unique trimmed strings, each at most 60 characters, no commas/newlines. Empty content is allowed. `links` is an array of up to 100 card IDs, trimmed and deduplicated; self-links and new references to absent cards return 400. Links are bidirectional metadata, not delegation or Canvas edges. Adding A → B automatically adds B → A; removing it from either card removes both. Creation/update commits all affected cards in one transaction and updates their timestamps; exceeding the 100-link limit on a reverse-link target returns 400 and rolls back the entire operation. Snapshots/GET reflect updated cards on both sides. Startup migration fills missing reverse links in existing libraries. Existing references to deleted cards remain stored and may be retained in later updates; setting `links: []` clears them. Links and tags are outside the content-unit limit.
 
 Validation errors return 400; absent cards/placements return 404. Only create or modify the user's cards when asked. Library contents persist in SQLite independently of the Canvas JSON; removing a placement or resetting the Canvas does not delete library cards. Do not interpret cards as delegation relationships.
+
+## Card attachments (human UI)
+
+Each card has at most one image and one audio. `image` and `audio` are either `null` or `{id, kind, name, mime, size, createdAt, url}`. `name` is the original filename; `size` is bytes; `url` is a localhost-relative `/api/card-files/:id` URL, not an external URL or filesystem path. Attachments are independent of Markdown and do not count toward 400 text units. Normal card POST/PATCH cannot set these fields.
+
+The browser supports dragging JPEG/PNG/WebP/GIF (10 MB) or MP3/M4A/WAV/OGG (50 MB) onto a card, not empty Canvas. It renders audio → image → text; metadata includes unlink controls. Switching Canvas preserves playback, and only one audio plays at a time.
+
+Browser transport endpoints (not agent upload tools in this version):
+- `PUT /api/cards/:id/media/image` or `/audio`: raw file bytes, with `X-File-Name` containing the URI-encoded original filename. Replacements require `If-Match` containing the current attachment UUID (unquoted). An empty slot must omit it. The slot is checked before and after streaming; stale replacements return 409. Successful uploads return the updated card, and SSE refreshes both modes.
+- `DELETE /api/cards/:id/media/image` or `/audio` with `{"attachmentId":"<CURRENT_ATTACHMENT_UUID>"}`: unlink only, returning the updated card. A stale ID returns 409.
+- `GET`/`HEAD /api/card-files/:id`: serve registered files using their actual detected MIME type, nosniff, immutable IDs and single byte-range support for seeking. Invalid ranges return 416. Missing files or byte-size mismatches return 404; oversized uploads return 413, unsupported formats 415, invalid names/empty files 400.
+
+Files live in `images/` and `audios/` alongside SQLite. Replacing/unlinking attachments or permanently deleting cards **retains accepted file bytes and metadata** for a future audit; failed/uncommitted uploads are cleaned up. No audit or deletion endpoint for stored files is introduced. Reset/removing a Canvas placement does not unlink attachments. Agents may read attachment metadata but must not use upload/unlink transport, write files directly into these directories, or alter attachment tables in this version.
 
 ## Card box workspace lifecycle (human UI)
 

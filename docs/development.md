@@ -34,6 +34,8 @@ PORT=3002 AGENT_CANVAS_STATE_FILE="$TEST_DIR/canvas.json" \
 
 Test card creation, content/metadata editing and flipping, debounced auto-save, over-limit draft preservation and save blocking, Markdown rendering, reload retention, placement removal without library deletion, permanent deletion confirmation, and Reset preserving the library. Card box is a separate editable whiteboard, showing all library cards and at most one fixed agent. Check mode switching preserves terminal DOM/connection, saved layout independence, append-only grid placement, singleton launch, stop/resume, exact-session restore and Agent Canvas reset isolation. No query/filter or selected-card interaction is included. Version-2 Canvas files are not readable by the pre-card-box branch.
 
+Media checks: use isolated data. Test real file drops in both modes, image+audio ordering, confirmation/cancel for replacements, image preview, audio seek and mode continuity, one-player behavior, independent invalid text drafts, stale replacement/removal conflicts, range responses and metadata persistence after restart. Accepted files must remain after replacement, unlinking, card deletion and reset. Invalid/aborted uploads must leave no staging files or changed associations. Test schema-3→4 migration without changing existing cards/links/sequences; older code rejects the new database schema. Backups need the entire images/ and audios/ directories as well as JSON/SQLite.
+
 ## Source map
 
 - `server/index.js` — live state, auto-save/restore orchestration, validation, Pi PTYs, HTTP/SSE/WebSocket, static production assets, served API guide.
@@ -46,6 +48,9 @@ Test card creation, content/metadata editing and flipping, debounced auto-save, 
 - `server/card-store.js` — SQLite cards, schema version, daily sequences, startup backup.
 - `server/card-links.test.js`, `server/card-links-migration.test.js` — reciprocal additions/removals, timestamps, atomic rollback on full targets, v2 backfill and historical references.
 - `server/cards.test.js`, `server/card-store.test.js` — isolated card API, persistence and backup tests.
+- `server/card-media-store.js`, `server/card-media.test.js` — validated streaming uploads, retained files, HTTP range serving and migration tests.
+- `shared/card-media.js`, `shared/card-media.test.js` — supported kinds, limits and drop validation.
+- `src/card-media.jsx`, `src/card-audio.js`, `src/card-audio.test.js` — attachment UI and shared playback state.
 - `shared/card-content.js` — shared Markdown validation and 400-unit counter.
 - `src/cards.jsx` — front/back editable cards shared by both workspace modes.
 - `server/card-box-layout.js`, `server/card-box.test.js` — append-only grid placement and fixed-agent/layout lifecycle tests.

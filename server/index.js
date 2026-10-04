@@ -1,4 +1,5 @@
 import http from 'node:http';
+import { initializeMedia, storeMediaUpload, serveMedia } from './card-media-store.js';
 import { CardStore } from './card-store.js';
 import { syncCardBoxPlacements } from './card-box-layout.js';
 import { storagePaths } from './storage-paths.js';
@@ -55,6 +56,7 @@ async function savedWorkdirs(sessionRoot) {
 }
 
 export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = pty.spawn, stateFile = null, cardsFile = stateFile ? stateFile + '.cards.sqlite' : ':memory:',
+  mediaDirectory = cardsFile === ':memory:' ? null : dirname(resolve(cardsFile)),
   sessionsRoot = process.env.PI_CODING_AGENT_SESSION_DIR || join(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'), 'sessions') } = {}) {
   const agents = new Map();
   const processes = new Map();
@@ -275,6 +277,20 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     }
     if (url.pathname.startsWith('/api/')) {
       try {
+        if (closing || resetting) return reply(res, 503, { error: 'Canvas is shutting down or resetting' });
+        const mediaSlot = url.pathname.match(/^\/api\/cards\/([^/]+)\/media\/(image|audio)$/);
+        if (mediaSlot && req.method === 'PUT') {
+          const [, id, kind] = mediaSlot;
+          const expected = req.headers['if-match'] ?? null;
+          cards.assertMediaSlot(id, kind, expected);
+          const card = await storeMediaUpload(req, mediaDirectory, kind, req.headers['x-file-name'], file => {
+            if (closing || resetting) throw Object.assign(new Error('Canvas is shutting down or resetting'), { status: 503 });
+            return cards.setMedia(id, kind, file, expected);
+          });
+          broadcast(); return reply(res, 200, card);
+        }
+        const mediaFile = url.pathname.match(/^\/api\/card-files\/([^/]+)$/);
+        if (mediaFile && ['GET', 'HEAD'].includes(req.method)) return await serveMedia(req, res, mediaDirectory, cards.mediaFile(mediaFile[1]));
         let body = {};
         if (['POST', 'PATCH', 'DELETE'].includes(req.method)) {
           let raw = '';
@@ -286,6 +302,12 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Expected JSON object');
         }
         if (closing || resetting) return reply(res, 503, { error: 'Canvas is shutting down or resetting' });
+        if (mediaSlot && req.method === 'DELETE') {
+          if (Object.keys(body).some(key => key !== 'attachmentId') || typeof body.attachmentId !== 'string') throw new Error('Removal requires the current attachmentId');
+          const [, id, kind] = mediaSlot;
+          const card = cards.setMedia(id, kind, null, body.attachmentId);
+          broadcast(); return reply(res, 200, card);
+        }
         if (url.pathname === '/api/canvas/reset' && req.method === 'POST') {
           if (body.confirm !== true) throw new Error('Reset requires confirm: true');
           resetting = true;
@@ -526,6 +548,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
         unlockCards = cardsFile === ':memory:' ? () => {} : lockCanvas(cardsFile);
         cards = new CardStore(cardsFile);
         cards.list(); // Validate the database before accepting requests.
+        await initializeMedia(mediaDirectory);
         await cards.backup();
       } // Fail closed: never overwrite a corrupt save.
       catch (error) { cards?.close(); unlockCards(); unlock(); throw error; }

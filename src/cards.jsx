@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { CardAudio, CardImage, CardAttachmentInfo, useCardUpload } from './card-media.jsx';
 import { createCardAutosaver } from './card-autosave.js';
 import Markdown from 'react-markdown';
 import { NodeResizer, useViewport } from '@xyflow/react';
@@ -16,6 +17,7 @@ function CardIcon({ type }) {
   </svg>;
 }
 export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = false, onDelete, fontSize, draggable = false }) {
+  const media = useCardUpload(card);
   const [back, setBack] = useState(false);
   const [editing, setEditing] = useState(!readOnly && !card.content);
   const [content, setContent] = useState(card.content);
@@ -42,7 +44,7 @@ export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = fal
   useEffect(() => { autosaver.current?.update(content, tags, links); }, [content, tags, links]);
   let units = 0, invalid = '';
   try { units = inspectCardContent(content); } catch (e) { invalid = e.message; }
-  return <div className="card-face nowheel nopan">
+  return <div className={`card-face nowheel nopan${media.dropping ? ' media-drop-target' : ''}`} {...(readOnly ? {} : media.dropProps)}>
     <header className={onRemove || draggable ? 'card-toolbar card-drag-handle' : 'card-toolbar'} aria-label={onRemove || draggable ? 'Drag to move card' : 'Card controls'}>
       <button type="button" className="card-icon nodrag" title={back ? 'View content' : 'View metadata'} aria-label={back ? 'View card content' : 'View card metadata'} aria-pressed={back} onClick={() => setBack(value => !value)}><CardIcon type="flip" /></button>
       {!readOnly && <button type="button" className="card-icon nodrag" title={editing ? 'Done editing' : 'Edit card'} aria-label={editing ? 'Done editing card' : 'Edit card'} aria-pressed={editing} onClick={() => setEditing(value => !value)}><CardIcon type={editing ? 'done' : 'edit'} /></button>}
@@ -50,11 +52,14 @@ export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = fal
       {onRemove && <button type="button" className="card-icon nodrag" title="Remove from Canvas (keeps card)" aria-label="Remove card from Canvas" onClick={onRemove}><CardIcon type="remove" /></button>}
     </header>
     <div className="card-body nodrag" style={fontSize === undefined ? undefined : { fontSize }}>
-      {back ? <div className="card-meta"><dl><dt>ID</dt><dd>{card.id}</dd><dt>Tags</dt><dd>{editing ? <input aria-label="Card tags" placeholder="tag, tag" value={tags} onChange={e => setTags(e.target.value)} /> : tags.trim() ? [...new Set(tags.split(',').map(tag => tag.trim()).filter(Boolean))].map(tag => <span className="card-tag" key={tag}>{tag}</span>) : '—'}</dd><dt title="Links are bidirectional: adding or removing one updates both cards.">Links ↔</dt><dd>{editing ? <input aria-label="Card links" placeholder="2026-10-03-0001, 2026-10-03-0002" value={links} onChange={e => setLinks(e.target.value)} /> : links.trim() ? [...new Set(links.split(/[,\s]+/).filter(Boolean))].map(id => <span className="card-tag" key={id}>{id}</span>) : '—'}</dd></dl></div>
-        : editing ? <textarea aria-label="Card Markdown" maxLength={20000} value={content} onChange={e => setContent(e.target.value)} placeholder="One idea, in Markdown…" />
-          : <div className="card-markdown"><Markdown skipHtml disallowedElements={['img']}>{content || '*Empty card*'}</Markdown></div>}
+      {back ? <div className="card-meta"><dl><dt>ID</dt><dd>{card.id}</dd><dt>Tags</dt><dd>{editing ? <input aria-label="Card tags" placeholder="tag, tag" value={tags} onChange={e => setTags(e.target.value)} /> : tags.trim() ? [...new Set(tags.split(',').map(tag => tag.trim()).filter(Boolean))].map(tag => <span className="card-tag" key={tag}>{tag}</span>) : '—'}</dd><dt title="Links are bidirectional: adding or removing one updates both cards.">Links ↔</dt><dd>{editing ? <input aria-label="Card links" placeholder="2026-10-03-0001, 2026-10-03-0002" value={links} onChange={e => setLinks(e.target.value)} /> : links.trim() ? [...new Set(links.split(/[,\s]+/).filter(Boolean))].map(id => <span className="card-tag" key={id}>{id}</span>) : '—'}</dd><CardAttachmentInfo card={card} onRemove={media.remove} busy={media.status.busy || readOnly} /></dl></div>
+        : <><div className="card-attachments">{card.audio && <CardAudio file={card.audio} />}{card.image && <CardImage key={card.image.id} file={card.image} />}</div>{editing ? <textarea aria-label="Card Markdown" maxLength={20000} value={content} onChange={e => setContent(e.target.value)} placeholder="One idea, in Markdown…" />
+          : <div className="card-markdown"><Markdown skipHtml disallowedElements={['img']}>{content || '*Empty card*'}</Markdown></div>}</>}
     </div>
     <div className={units > CARD_LIMIT || invalid ? 'card-count invalid nodrag' : 'card-count nodrag'} title="CJK characters + English words. Markdown syntax, whitespace and punctuation do not count.">{invalid || `Text units: ${units} / ${CARD_LIMIT}`}</div>
+    {media.dropping && <div className="card-drop-hint">Drop image or audio here</div>}
+    {media.status.busy && <div className="card-count" role="status">{media.status.message}</div>}
+    {media.status.error && <div className="card-media-error" role="alert">{media.status.error}</div>}
     {!readOnly && <div className="card-footer nodrag"><div className={status.state === 'error' ? 'node-error' : 'card-count'} role="status">{status.state === 'error' ? `Not saved: ${status.error}` : status.state === 'saving' ? 'Saving…' : 'Saved'}{status.state === 'error' && !invalid && units <= CARD_LIMIT && <button type="button" onClick={() => autosaver.current?.update(content, tags, links)}>Retry</button>}</div>{onDelete && <button type="button" className="card-delete" onClick={onDelete}>Delete permanently…</button>}</div>}
   </div>;
 }
@@ -76,7 +81,7 @@ export function CardNode({ id, data, selected }) {
     catch (e) { setError(e.message); }
   };
   const destroy = async () => {
-    if (!confirm('Permanently delete this card from the card box and Canvas?')) return;
+    if (!confirm('Permanently delete this card from the card box and Canvas? Attachment files will be retained for a future audit.')) return;
     try { await request('/cards/' + data.card.id, 'DELETE', { confirm: true }); }
     catch (e) { setError(e.message); }
   };

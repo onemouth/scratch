@@ -46,7 +46,7 @@ test('SQLite v1 migration keeps existing content, tags, ID and daily sequence', 
     assert.equal(next.id, '2026-10-03-0002');
     assert.deepEqual(next.links, [card.id]);
     assert.deepEqual(store.get(card.id).links, [next.id]);
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 3);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 4);
   } finally { store.close(); rmSync(directory, { recursive: true, force: true }); }
 });
 

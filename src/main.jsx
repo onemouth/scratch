@@ -2,6 +2,7 @@ import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ReactFlow, Background, Controls, ControlButton, Handle, NodeResizer, Position, BaseEdge, EdgeLabelRenderer, getBezierPath, applyNodeChanges, useReactFlow, useViewport, ReactFlowProvider, useNodesInitialized } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
+import { cardAudio } from './card-audio.js';
 import { WorkspaceOverview } from './workspace-overview.jsx';
 import { Terminal } from '@xterm/xterm';
 import { FitAddon } from '@xterm/addon-fit';
@@ -193,6 +194,13 @@ function Canvas() {
   const [mode, setMode] = useState(() => {
     try { return localStorage.getItem('agent-canvas:workspace') === 'card-box' ? 'card-box' : 'agents'; } catch { return 'agents'; }
   });
+  useEffect(() => { cardAudio.reconcile(state.cards || []); }, [state.cards]);
+  useEffect(() => {
+    // Ignore files dropped outside a card without letting the browser navigate.
+    const prevent = event => { if (event.dataTransfer?.types?.includes('Files')) event.preventDefault(); };
+    window.addEventListener('dragover', prevent); window.addEventListener('drop', prevent);
+    return () => { window.removeEventListener('dragover', prevent); window.removeEventListener('drop', prevent); };
+  }, []);
   const stateRef = React.useRef(state);
   stateRef.current = state;
   const initialized = useNodesInitialized();

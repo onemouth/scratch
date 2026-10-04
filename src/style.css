@@ -110,7 +110,22 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .card-toolbar .card-icon { width: 18px; height: 18px; padding: 0; display: grid; place-items: center; flex: none; cursor: pointer; }
 .card-icon svg { width: 13px; height: 13px; }
 .card-icon:focus-visible { outline: 2px solid #245b9c; outline-offset: 2px; }
-.card-face { display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; font-size: 14px; }
+.card-attachments:empty { display: none; }
+.card-audio { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding: 8px 12px; }
+.card-audio button { border: 0; border-radius: 4px; padding: 4px 7px; color: #202a40; background: #cad4ec; }
+.card-audio input { flex: 1; min-width: 40px; width: 60px; }
+.card-audio span { font-size: .85em; white-space: nowrap; }
+.card-audio small { flex-basis: 100%; color: #a12323; }
+.card-image { display: block; width: calc(100% - 24px); margin: 4px 12px 8px; padding: 0; border: 0; background: transparent; cursor: zoom-in; }
+.card-image img { display: block; width: 100%; height: auto; }
+.card-media-remove { margin-left: 6px; background: transparent; border: 0; color: #7c4350; text-decoration: underline; }
+.card-media-error { padding: 6px 12px; color: #a12323; font-size: 11px; overflow-wrap: anywhere; }
+.media-drop-target { outline: 3px solid #6486db; outline-offset: -3px; }
+.card-drop-hint { position: absolute; inset: 30px 8px 30px; display: grid; place-items: center; border: 2px dashed #6486db; background: #e5e8faeb; color: #245b9c; pointer-events: none; z-index: 5; }
+.card-image-preview { position: fixed; inset: 0; z-index: 1000; background: #080f1ce8; display: grid; place-items: center; padding: 40px; }
+.card-image-preview img { max-width: 100%; max-height: calc(100vh - 80px); object-fit: contain; }
+.card-image-preview button { position: absolute; right: 16px; top: 12px; border: 0; color: white; background: #26334b; border-radius: 6px; font-size: 24px; }
+.card-face { position: relative; display: flex; flex-direction: column; flex: 1; min-height: 0; overflow: hidden; font-size: 14px; }
 .card-toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 4px; min-height: 26px; padding: 4px 8px; border-bottom: 1px solid #bec8df; font-size: 11px; flex: none; }
 .card-body { flex: 1; min-height: 0; overflow: auto; }
 .card-body textarea { width: 100%; height: 100%; min-height: 120px; padding: 12px; border: 0; outline: none; resize: none; background: #f2f4fc; color: #202a40; font-family: ui-monospace, monospace; font-size: inherit; }
