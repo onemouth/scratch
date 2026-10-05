@@ -1,4 +1,5 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { cardTypography, viewportWidth, subscribeViewportWidth } from './card-typography.js';
 import { CardAudio, CardImage, CardAttachmentInfo, useCardUpload } from './card-media.jsx';
 import { createCardAutosaver } from './card-autosave.js';
 import Markdown from 'react-markdown';
@@ -65,8 +66,8 @@ export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = fal
 }
 export function CardNode({ id, data, selected }) {
   const { zoom } = useViewport();
-  // Scale with the paper, never below 11 screen px.
-  const fontSize = Math.max(13, 11 / zoom);
+  const width = useSyncExternalStore(subscribeViewportWidth, viewportWidth, viewportWidth);
+  const { fontSize } = cardTypography(width, zoom);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
   const add = async () => {
