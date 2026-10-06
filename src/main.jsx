@@ -12,6 +12,7 @@ import './style.css';
 import { pasteChunks } from './terminal-paste.js';
 import { correctTerminalMouseScale } from './terminal-mouse-scale.js';
 import { completedAgents } from './agent-notifications.js';
+import { includeCreatedAgent } from './agent-state.js';
 import { CardNode } from './cards.jsx';
 
 async function api(path, method = 'GET', body) {
@@ -340,8 +341,10 @@ function Canvas() {
     appliedMode.current = mode;
     const saved = viewportByMode.current[mode];
     if (saved) setViewport(saved);
-    else fitView({ nodes: nodes.filter(node => node.data.workspace === mode).map(node => ({ id: node.id })), padding: 0.3 });
-  }, [mode, nodes, initialized, fitView, getViewport, setViewport]);
+    // A human launch into an empty workspace is already centered below. Do not
+    // let first-node initialization run fitView and change the current zoom.
+    else if (!focusTarget) fitView({ nodes: nodes.filter(node => node.data.workspace === mode).map(node => ({ id: node.id })), padding: 0.3 });
+  }, [mode, nodes, initialized, focusTarget, fitView, getViewport, setViewport]);
   useEffect(() => {
     if (!focusTarget || open || docsOpen || centeredRequest.current === focusTarget.request) return;
     const node = nodes.find(node => node.id === focusTarget.id);
@@ -371,7 +374,11 @@ function Canvas() {
     } catch (e) { setError(e.message); }
   };
   const launchBoxAgent = async () => {
-    try { const agent = await api('/card-box/agent', 'POST', {}); focusAgent(agent.id, 'card-box'); }
+    try {
+      const agent = await api('/card-box/agent', 'POST', {});
+      setState(current => includeCreatedAgent(current, agent));
+      focusAgent(agent.id, 'card-box');
+    }
     catch (e) { setError(e.message); }
   };
   const createNote = async () => {
@@ -383,6 +390,7 @@ function Canvas() {
     try {
       const position = screenToFlowPosition({ x: innerWidth / 2 - 210, y: innerHeight / 2 - 160 });
       const agent = await api('/agents', 'POST', { ...form, x: position.x, y: position.y });
+      setState(current => includeCreatedAgent(current, agent));
       focusAgent(agent.id);
       setForm(f => ({ ...f, name: '' })); setOpen(false);
     } catch (err) { setError(err.message); }

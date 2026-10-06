@@ -20,6 +20,8 @@ Vite proxies `/api` (including the terminal WebSocket) to the Node server in dev
 
 For optional private tailnet **dev-mode** access (Serve → Vite 5173 → /api backend), see [README](../README.md#private-tailscale-access-optional). `npm run tailscale:setup` only inspects and prints a plan; `--apply` mutates Serve and must be run explicitly by the user after checking access policies. Do not apply/reset a real Tailscale configuration during automated tests. Unit tests use injected CLI responses and fake PTYs to cover fail-closed setup, HTTP/WS origin enforcement, guide URLs and loopback agent URLs. For an HTTPS proxy smoke test, use isolated state/cards, a loopback test proxy and fake PTYs; verify HMR without page reload, local and remote Vite access, SSE, WSS input/output and attachment requests without invoking real models or modifying live data.
 
+Agent launch regression: with isolated storage and fake PTYs, delay SSE mutations while keeping the initial stream connected. New/Resume and the fixed Card box agent must appear and focus from their successful POST responses without reload, duplicate spawns or task replay. Launching into an empty workspace must preserve zoom. A delayed POST response must not overwrite a newer SSE version of the agent.
+
 For a manual end-to-end check: choose a saved Pi session folder from the workdir dropdown (or enter one manually), then create an Agent in the browser; confirm its empty Pi TUI appears, type a simple task into the terminal, check resizing, create an edge and edit its label, check the Guide's copied URL and that Stop leaves the node visible. Remove the stopped node and check that its edges disappear, then try **Resume · pi -r** in the same workdir and choose that saved Pi session. Sending a task invokes your configured model; the automated tests do not.
 
 For persistence checks, set both `AGENT_CANVAS_STATE_FILE` and `AGENT_CANVAS_CARDS_FILE` to temporary paths. The CLI otherwise uses the shared default card database even with a custom Canvas path. Create nodes and notes, restart the server, and verify the same IDs/layout return and running nodes reopen conversations without a task. Stop one node before restarting and verify it stays stopped. Test a missing session/workdir, then Reset Canvas and restart again to confirm it stays empty. Never run reset tests against your working Canvas.
@@ -60,6 +62,7 @@ Media checks: use isolated data. Test real file drops in both modes, image+audio
 - `src/cards.jsx` — front/back editable cards shared by both workspace modes.
 - `server/card-box-layout.js`, `server/card-box.test.js` — append-only grid placement and fixed-agent/layout lifecycle tests.
 - `src/main.jsx` — canvas and terminal browser UI.
+- `src/agent-state.js`, `src/agent-state.test.js` — immediate successful launch inclusion without relying on SSE, duplicate prevention and preservation of newer streamed state.
 - `src/style.css` — canvas, nodes, terminal and guide styling.
 - `docs/agent-api.md` — single source for the copyable agent-facing API guide (the server substitutes `$AGENT_CANVAS_URL` when serving it).
 - `docs/architecture.md` — runtime data flow and boundaries.
