@@ -15,6 +15,8 @@ Open **http://127.0.0.1:5173**. Enter an existing working directory's absolute p
 
 Use the single mouse/touchpad icon button beneath the bottom-left zoom controls to switch modes (the icon shows the current mode): **Mouse** uses right-drag to pan and the wheel to zoom; **Touchpad** uses two-finger scroll to pan and pinch to zoom. Drag nodes by their headers, resize selected nodes, and connect right-to-left handles to record delegation. Click a connection's label to edit its display text; the underlying relationship remains a delegation.
 
+Right-click an **agent name** in its header and choose **Copy agent name** to copy its full name, or **Copy agent UUID** to copy the ID used by the API, including when the title is truncated or the agent is maximized. Keyboard users can focus the name and press **Shift+F10** or the context-menu key, then use Up/Down to choose an action and Enter to copy. Escape closes the menu; left-dragging the header still moves the node. Works in both Agent Canvas and Card box; clipboard access needs localhost or HTTPS and browser permission.
+
 Use **＋ Note** to add a yellow sticky note. Notes display only their body text, with no title. Drag only the paper's top edge to move it, resize the note when selected, and edit its text directly (saved when the editor loses focus). Text scales with the canvas while staying at least 14 screen pixels for readability. Hover over the note to reveal **×** in the top-right corner and delete it (also available with keyboard focus or on touch devices). Notes are independent of agents and are saved with the Canvas.
 
 ## Private Tailscale access (optional)

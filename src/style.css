@@ -51,6 +51,10 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .react-flow__node.selected .agent-node { border-color: #a5a7fa; box-shadow: 0 0 0 1px #a5a7fa, 0 16px 48px #060d1a99; }
 .node-header { padding: 10px 13px; display: flex; align-items: center; gap: 8px; border-bottom: 1px solid #303d53; min-height: 39px; }
 .node-header strong { font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.node-header strong:focus-visible { outline: 1px solid #a5a7fa; outline-offset: 3px; border-radius: 2px; }
+.agent-name-menu { position: fixed; z-index: 20000; width: 180px; padding: 4px; border: 1px solid #39465e; border-radius: 6px; background: #182235; box-shadow: 0 8px 24px #0008; }
+.agent-name-menu button { width: 100%; padding: 7px 9px; border: 0; border-radius: 3px; background: transparent; color: #d1dcec; text-align: left; font-size: 12px; cursor: pointer; }
+.agent-name-menu button:hover, .agent-name-menu button:focus-visible { background: #2b3852; outline: none; }
 .status-dot { width: 7px; height: 7px; flex: none; border-radius: 50%; background: #d8b776; }
 .running .status-dot { background: #8ddaaa; box-shadow: 0 0 8px #8ddaaa; }
 .stopped .status-dot { background: #64728a; }
