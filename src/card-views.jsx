@@ -1,4 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { CardFace } from './cards.jsx';
 import { CardMarkdown } from './card-markdown.js';
 
@@ -15,7 +16,7 @@ function Dialog({ title, children, onClose }) {
     (root.current?.querySelector('input') ?? root.current?.querySelector('button'))?.focus();
     return () => { if (previous?.isConnected) previous.focus(); };
   }, []);
-  return <div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
+  return createPortal(<div className="overlay" onMouseDown={e => { if (e.target === e.currentTarget) onClose(); }}>
     <section ref={root} className="modal view-dialog" role="dialog" aria-modal="true" aria-label={title} onKeyDown={e => {
       e.stopPropagation();
       if (e.key === 'Escape') { e.preventDefault(); onClose(); }
@@ -26,7 +27,7 @@ function Dialog({ title, children, onClose }) {
         else if (!e.shiftKey && index === items.length - 1) { e.preventDefault(); items[0]?.focus(); }
       }
     }}><div className="modal-head"><h2>{title}</h2><button type="button" aria-label="Close dialog" onClick={onClose}>×</button></div>{children}</section>
-  </div>;
+  </div>, document.body);
 }
 export function ViewControls({ box, libraryOpen, onLibrary, onChange, onError, beforeSwitch }) {
   const active = box?.views?.find(v => v.id === box.activeViewId);
@@ -54,9 +55,9 @@ export function ViewControls({ box, libraryOpen, onLibrary, onChange, onError, b
       </select></label>
       <button type="button" disabled={busy} onClick={() => leave('new')}>＋ New view</button>
       {!active.saved && <button type="button" disabled={busy} onClick={() => open('save')}>Save view</button>}
-      <button type="button" disabled={busy} onClick={() => open('rename')}>Rename</button>
-      <button type="button" disabled={busy} onClick={() => open('delete')}>Delete view…</button>
       <span className="view-state">{active.placements.length} cards · {active.saved ? 'Autosave' : 'Temporary · recoverable'}</span>
+      <button type="button" disabled={busy} onClick={() => open('rename')}>Rename</button>
+      <button type="button" className="view-danger" disabled={busy} onClick={() => open('delete')}>Delete view…</button>
     </nav>
     {dialog && <Dialog title={dialog.type === 'leave' ? 'Leave temporary view?' : dialog.type === 'delete' ? 'Delete view?' : dialog.type === 'save' ? 'Save view' : 'Rename view'} onClose={() => { if (!busy) setDialog(null); }}>
       <form onSubmit={e => {
