@@ -17,6 +17,7 @@ import { CardNode, reconcileCardDrafts } from './cards.jsx';
 import { AgentName } from './agent-name.jsx';
 import { CardLibrary, ViewControls } from './card-views.jsx';
 import { mergeViewResponse, mergeViewSnapshot, nodeMeasurement as measuredLike } from './card-view-state.js';
+import { cardsWithExactTag, recursivelyLinkedCards, uniqueViewName } from './card-view-explore.js';
 
 async function api(path, method = 'GET', body) {
   const response = await fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -209,6 +210,16 @@ function Canvas() {
   }, []);
   const stateRef = React.useRef(state);
   stateRef.current = state;
+  const [exploreRequest, setExploreRequest] = useState(null);
+  const exploreSequence = React.useRef(0);
+  const exploreTag = useCallback(tag => {
+    const current = stateRef.current, cardIds = cardsWithExactTag(current.cards || [], tag);
+    setExploreRequest({ id: ++exploreSequence.current, name: uniqueViewName(`Tag: ${tag}`, current.cardBox?.views || []), cardIds });
+  }, []);
+  const exploreLink = useCallback((sourceId, linkedId) => {
+    const current = stateRef.current, cardIds = recursivelyLinkedCards(current.cards || [], sourceId, linkedId);
+    setExploreRequest({ id: ++exploreSequence.current, name: uniqueViewName(`Linked: ${linkedId}`, current.cardBox?.views || []), cardIds });
+  }, []);
   const initialized = useNodesInitialized();
   const viewportByMode = React.useRef({});
   const appliedMode = React.useRef(null);
@@ -216,6 +227,7 @@ function Canvas() {
   const appliedViewport = React.useRef(null);
   const viewportSequence = React.useRef(0);
   const viewportGesture = React.useRef(null);
+  const fitViewRequest = React.useRef(null);
   const pendingViewports = React.useRef(new Map());
   const dragTargets = React.useRef(new Map());
   const restorePlacement = useCallback((id, p) => {
@@ -346,10 +358,19 @@ function Canvas() {
         if (!card) return [];
         const id = `card-box-${placement.id}`, old = byId.get(id);
         const dragging = old?.dragging && old.data.viewId === state.cardBox.activeViewId;
-        return [{ id, type: 'card', measured: measuredLike(old, placement.width, placement.height), dragging, dragHandle: '.card-drag-handle', position: dragging ? old.position : { x: placement.x, y: placement.y }, style: { width: placement.width, height: placement.height, visibility: mode === 'card-box' ? 'visible' : 'hidden', pointerEvents: mode === 'card-box' ? 'auto' : 'none' }, data: { card, placement, restorePlacement, cardBox: true, viewId: state.cardBox.activeViewId, inAgentCanvas: (state.cardPlacements || []).some(item => item.cardId === card.id), workspace: 'card-box' }, selected: old?.selected }];
+        return [{ id, type: 'card', measured: measuredLike(old, placement.width, placement.height), dragging, dragHandle: '.card-drag-handle', position: dragging ? old.position : { x: placement.x, y: placement.y }, style: { width: placement.width, height: placement.height, visibility: mode === 'card-box' ? 'visible' : 'hidden', pointerEvents: mode === 'card-box' ? 'auto' : 'none' }, data: { card, placement, restorePlacement, cardBox: true, viewId: state.cardBox.activeViewId, onExploreTag: exploreTag, onExploreLink: exploreLink, inAgentCanvas: (state.cardPlacements || []).some(item => item.cardId === card.id), workspace: 'card-box' }, selected: old?.selected }];
       })];
     });
-  }, [mode, state.cardBox, state.agents, state.notes, state.cards, state.cardPlacements, focusTarget, open, docsOpen, focusAgent, maximizedId, maximizeAgent, maximizeFocus]);
+  }, [mode, state.cardBox, state.agents, state.notes, state.cards, state.cardPlacements, focusTarget, open, docsOpen, focusAgent, exploreTag, exploreLink, maximizedId, maximizeAgent, maximizeFocus]);
+  const persistViewport = useCallback(async (id, viewport) => {
+    if (!id) return;
+    pendingViewports.current.set(id, (pendingViewports.current.get(id) || 0) + 1);
+    try { mergeBox(await api('/card-box/views/' + id + '/viewport', 'PATCH', viewport)); }
+    finally {
+      const remaining = pendingViewports.current.get(id) - 1;
+      if (remaining) pendingViewports.current.set(id, remaining); else pendingViewports.current.delete(id);
+    }
+  }, [mergeBox]);
   useEffect(() => {
     const box = state.cardBox;
     const key = mode === 'card-box' ? 'card-box:' + box?.activeViewId : 'agents';
@@ -369,22 +390,22 @@ function Canvas() {
     appliedMode.current = key;
     appliedViewport.current = signature;
     const sequence = ++viewportSequence.current;
+    const fitCreated = mode === 'card-box' && fitViewRequest.current === box?.activeViewId;
     applyingViewport.current = true;
     let operation;
-    if (target) operation = setViewport(target);
+    if (fitCreated) operation = fitView({ nodes: nodes.filter(node => node.type === 'card' && node.data.viewId === box.activeViewId).map(node => ({ id: node.id })), padding: 0.2 });
+    else if (target) operation = setViewport(target);
     else if (!focusTarget && switched && mode === 'card-box' && !active?.saved) operation = setViewport({ x: 0, y: 0, zoom: 1 });
     else if (!focusTarget && switched) operation = fitView({ nodes: nodes.filter(node => node.data.workspace === mode).map(node => ({ id: node.id })), padding: 0.3 });
-    Promise.resolve(operation).finally(() => { if (sequence === viewportSequence.current) applyingViewport.current = false; });
-  }, [mode, state.cardBox, nodes, initialized, focusTarget, fitView, getViewport, setViewport]);
-  const persistViewport = useCallback(async (id, viewport) => {
-    if (!id) return;
-    pendingViewports.current.set(id, (pendingViewports.current.get(id) || 0) + 1);
-    try { mergeBox(await api('/card-box/views/' + id + '/viewport', 'PATCH', viewport)); }
-    finally {
-      const remaining = pendingViewports.current.get(id) - 1;
-      if (remaining) pendingViewports.current.set(id, remaining); else pendingViewports.current.delete(id);
-    }
-  }, [mergeBox]);
+    Promise.resolve(operation).then(() => {
+      if (sequence !== viewportSequence.current) return;
+      applyingViewport.current = false;
+      if (fitCreated && fitViewRequest.current === box.activeViewId) {
+        fitViewRequest.current = null;
+        persistViewport(box.activeViewId, getViewport()).catch(e => setError(e.message));
+      }
+    }, () => { if (sequence === viewportSequence.current) applyingViewport.current = false; });
+  }, [mode, state.cardBox, nodes, initialized, focusTarget, fitView, getViewport, setViewport, persistViewport]);
   const beforeViewSwitch = useCallback(async id => {
     if (mode === 'card-box' && stateRef.current.cardBox?.activeViewId === id && appliedMode.current === 'card-box:' + id && !applyingViewport.current) await persistViewport(id, getViewport());
   }, [mode, persistViewport, getViewport]);
@@ -462,7 +483,7 @@ function Canvas() {
   return <div className={`app${maximizedId ? ' is-maximized' : ''}`}>
     <div className={`topbar${mode === 'card-box' ? ' has-view-controls' : ''}`}>
       <div className="workspace-nav"><div className="brand"><span className="brand-icon">✳</span> {mode === 'card-box' ? 'Card box' : 'Agent Canvas'} <small>PI WORKSPACE</small></div><button type="button" className="guide-button" onClick={switchMode}>{mode === 'agents' ? 'Card box' : 'Agent Canvas'}</button></div>
-      {mode === 'card-box' && <ViewControls box={state.cardBox} libraryOpen={libraryOpen} onLibrary={() => setLibraryOpen(v => !v)} onChange={mergeBox} onError={setError} beforeSwitch={beforeViewSwitch} />}
+      {mode === 'card-box' && <ViewControls box={state.cardBox} libraryOpen={libraryOpen} onLibrary={() => setLibraryOpen(v => !v)} onChange={mergeBox} onError={setError} beforeSwitch={beforeViewSwitch} exploreRequest={exploreRequest} onExploreCreated={id => { fitViewRequest.current = id; }} />}
       <div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button notification-toggle" type="button" aria-label={notificationsEnabled ? 'Disable browser notifications' : 'Enable browser notifications'} title={notificationsEnabled ? 'Browser notifications on · click to turn off' : 'Browser notifications off · click to enable'} aria-pressed={notificationsEnabled} onClick={toggleNotifications}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4" />{!notificationsEnabled && <path d="M3 3l18 18" />}</svg></button>{mode === 'agents' && <button className="guide-button" onClick={resetCanvas}>Reset Canvas</button>}<button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" onClick={createCard}>＋ Card</button>{mode === 'agents' ? <><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></> : !state.agents.some(agent => agent.workspace === 'card-box') && <button className="primary" onClick={launchBoxAgent}>Start Card box agent</button>}</div>
     </div>
     {mode === 'card-box' && libraryOpen && <CardLibrary cards={state.cards || []} box={state.cardBox} onChange={mergeBox} onClose={() => setLibraryOpen(false)} />}

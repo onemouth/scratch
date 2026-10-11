@@ -24,7 +24,7 @@ function CardIcon({ type }) {
     {type === 'flip' ? <><rect x="7" y="7" width="13" height="13" rx="2" /><path d="M16 4H4v12M4 4l4 4" /></> : type === 'edit' ? <><path d="m4 16 12-12 4 4-12 12-5 1zM14 6l4 4" /></> : type === 'done' ? <path d="m5 12 4 4L19 6" /> : type === 'add' ? <path d="M12 5v14M5 12h14" /> : <path d="m5 5 14 14M19 5 5 19" />}
   </svg>;
 }
-export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = false, onDelete, fontSize, draggable = false, draftScope = 'agents', removeFromView = false }) {
+export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = false, onDelete, onTagClick, onLinkClick, fontSize, draggable = false, draftScope = 'agents', removeFromView = false }) {
   const media = useCardUpload(card);
   const draftKey = draftScope + ':' + card.id;
   const restored = useRef(readOnly ? null : cardDrafts.get(draftKey));
@@ -71,7 +71,7 @@ export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = fal
       {onRemove && <button type="button" className="card-icon nodrag" title={removeFromView ? "Remove from current view (keeps library card)" : "Remove from Canvas (keeps card)"} aria-label={removeFromView ? "Remove card from current view" : "Remove card from Canvas"} onClick={onRemove}><CardIcon type="remove" /></button>}
     </header>
     <div className="card-body nodrag" style={fontSize === undefined ? undefined : { fontSize }}>
-      {back ? <div className="card-meta"><dl><dt>ID</dt><dd>{card.id}</dd><dt>Tags</dt><dd>{editing ? <input aria-label="Card tags" placeholder="tag, tag" value={tags} onChange={e => setTags(e.target.value)} /> : tags.trim() ? [...new Set(tags.split(',').map(tag => tag.trim()).filter(Boolean))].map(tag => <span className="card-tag" key={tag}>{tag}</span>) : '—'}</dd><dt title="Links are bidirectional: adding or removing one updates both cards.">Links ↔</dt><dd>{editing ? <input aria-label="Card links" placeholder="2026-10-03-0001, 2026-10-03-0002" value={links} onChange={e => setLinks(e.target.value)} /> : links.trim() ? [...new Set(links.split(/[,\s]+/).filter(Boolean))].map(id => <span className="card-tag" key={id}>{id}</span>) : '—'}</dd><CardAttachmentInfo card={card} onRemove={media.remove} busy={media.status.busy || readOnly} /></dl></div>
+      {back ? <div className="card-meta"><dl><dt>ID</dt><dd>{card.id}</dd><dt>Tags</dt><dd>{editing ? <input aria-label="Card tags" placeholder="tag, tag" value={tags} onChange={e => setTags(e.target.value)} /> : tags.trim() ? [...new Set(tags.split(',').map(tag => tag.trim()).filter(Boolean))].map(tag => onTagClick ? <button type="button" className="card-tag card-meta-link" title={`Open a temporary view for tag ${tag}`} key={tag} onClick={() => onTagClick(tag)}>{tag}</button> : <span className="card-tag" key={tag}>{tag}</span>) : '—'}</dd><dt title="Links are bidirectional: adding or removing one updates both cards.">Links ↔</dt><dd>{editing ? <input aria-label="Card links" placeholder="2026-10-03-0001, 2026-10-03-0002" value={links} onChange={e => setLinks(e.target.value)} /> : links.trim() ? [...new Set(links.split(/[,\s]+/).filter(Boolean))].map(linkedId => onLinkClick ? <button type="button" className="card-tag card-meta-link" title={`Open all cards recursively linked to ${linkedId}`} key={linkedId} onClick={() => onLinkClick(linkedId)}>{linkedId}</button> : <span className="card-tag" key={linkedId}>{linkedId}</span>) : '—'}</dd><CardAttachmentInfo card={card} onRemove={media.remove} busy={media.status.busy || readOnly} /></dl></div>
         : <><div className="card-attachments">{card.audio && <CardAudio file={card.audio} />}{card.image && <CardImage key={card.image.id} file={card.image} />}</div>{editing ? <textarea aria-label="Card Markdown" maxLength={20000} value={content} onChange={e => setContent(e.target.value)} placeholder="One idea, in Markdown…" />
           : <div className="card-markdown"><CardMarkdown content={content} /></div>}</>}
     </div>
@@ -111,7 +111,7 @@ export function CardNode({ id, data, selected }) {
       request(placementPath, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message));
     }} />
     <section className="zettel-card">
-      <CardFace card={data.card} onRemove={data.cardBox && !data.viewId ? undefined : remove} onAdd={data.cardBox && !data.inAgentCanvas ? add : undefined} adding={adding} onDelete={destroy} fontSize={fontSize} draftScope={data.cardBox ? 'card-box' : 'agents'} removeFromView={!!data.cardBox} draggable />
+      <CardFace card={data.card} onRemove={data.cardBox && !data.viewId ? undefined : remove} onAdd={data.cardBox && !data.inAgentCanvas ? add : undefined} adding={adding} onDelete={destroy} onTagClick={data.cardBox && data.viewId ? tag => data.onExploreTag(tag) : undefined} onLinkClick={data.cardBox && data.viewId ? linkedId => data.onExploreLink(data.card.id, linkedId) : undefined} fontSize={fontSize} draftScope={data.cardBox ? 'card-box' : 'agents'} removeFromView={!!data.cardBox} draggable />
       {error && <div className="node-error" role="alert">{error}</div>}
     </section>
   </>;

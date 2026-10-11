@@ -152,6 +152,8 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .card-meta dd { margin: 6px 0; }
 .card-meta input { width: 100%; padding: 7px; border: 1px solid #adb8d2; border-radius: 4px; background: #f2f4fc; color: #202a40; }
 .card-tag { display: inline-block; padding: 2px 6px; margin: 2px; background: #cad4ec; border-radius: 4px; }
+button.card-meta-link { border: 1px solid transparent; color: #245b9c; font: inherit; text-decoration: underline; text-decoration-color: #7895bc; text-underline-offset: 2px; }
+button.card-meta-link:hover, button.card-meta-link:focus-visible { background: #b9c8e5; border-color: #6486b5; outline: none; }
 .card-count { padding: 4px 12px; font-size: 10px; color: #55627c; flex: none; }
 .card-count.invalid { color: #a12323; }
 .card-footer { display: flex; align-items: center; justify-content: space-between; gap: 6px; flex: none; }

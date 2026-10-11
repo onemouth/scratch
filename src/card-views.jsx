@@ -29,8 +29,9 @@ function Dialog({ title, children, onClose }) {
     }}><div className="modal-head"><h2>{title}</h2><button type="button" aria-label="Close dialog" onClick={onClose}>×</button></div>{children}</section>
   </div>, document.body);
 }
-export function ViewControls({ box, libraryOpen, onLibrary, onChange, onError, beforeSwitch }) {
+export function ViewControls({ box, libraryOpen, onLibrary, onChange, onError, beforeSwitch, exploreRequest, onExploreCreated }) {
   const active = box?.views?.find(v => v.id === box.activeViewId);
+  const handledExplore = useRef(null);
   const [dialog, setDialog] = useState(null), [name, setName] = useState(''), [busy, setBusy] = useState(false), [error, setError] = useState('');
   const open = (type, target) => { setError(''); setName(active?.name || ''); setDialog({ type, target, source: box.activeViewId }); };
   const run = async operation => {
@@ -41,10 +42,18 @@ export function ViewControls({ box, libraryOpen, onLibrary, onChange, onError, b
   };
   const transition = (target, action, saveName, source = box.activeViewId) => run(async () => {
     await beforeSwitch(source);
-    const body = { fromViewId: source, ...(action ? { temporaryAction: action, saveName } : {}) };
-    return target === 'new' ? request('/card-box/views', 'POST', body) : request(`/card-box/views/${target}/activate`, 'POST', body);
+    const selection = typeof target === 'object' ? { name: target.name, cardIds: target.cardIds } : {};
+    const body = { ...selection, fromViewId: source, ...(action ? { temporaryAction: action, saveName } : {}) };
+    const result = target === 'new' || typeof target === 'object' ? await request('/card-box/views', 'POST', body) : await request(`/card-box/views/${target}/activate`, 'POST', body);
+    if (typeof target === 'object') onExploreCreated(result.activeViewId);
+    return result;
   });
   const leave = target => { if (active && !active.saved) open('leave', target); else transition(target); };
+  useEffect(() => {
+    if (!active || !exploreRequest || handledExplore.current === exploreRequest.id) return;
+    handledExplore.current = exploreRequest.id;
+    leave(exploreRequest);
+  }, [exploreRequest?.id, active?.id]);
   if (!active) return null;
   return <>
     <nav className="viewbar" aria-label="Card box views">

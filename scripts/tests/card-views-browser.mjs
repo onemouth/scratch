@@ -40,7 +40,9 @@ try {
   const data=await res.json();assert.ok(res.ok,JSON.stringify(data));return data;
  };
  const card=await api('/cards','POST',{content,tags:['crypto']});
- for(let i=0;i<31;i++)await api('/cards','POST',{content:'Fixture '+i,tags:['reading'],place:false});
+ const tagPeer=await api('/cards','POST',{content:'Fixture 0',tags:['Ｃrypto'],links:[card.id],place:false});
+ const linkedPeer=await api('/cards','POST',{content:'Fixture 1',tags:['reading'],links:[tagPeer.id],place:false});
+ for(let i=2;i<31;i++)await api('/cards','POST',{content:'Fixture '+i,tags:['reading'],place:false});
  const boxAgent=await api('/card-box/agent','POST',{});
  await api('/agents/'+boxAgent.id,'PATCH',{note:'Disposable fixture · echo terminal only · no Pi/model execution'});
  const original=app.snapshot().cardBox.activeViewId;
@@ -72,6 +74,7 @@ try {
  const select=async(id,sessionId)=>ev('(()=>{const e=document.querySelector("[aria-label=\\"Current view\\"]");e.value='+JSON.stringify(id)+';e.dispatchEvent(new Event("change",{bubbles:true}));})()',sessionId);
  const active=()=>app.snapshot().cardBox.activeViewId;
  const nodeSelector='.react-flow__node-card[data-id="card-box-'+card.id+'"]';
+ const libraryClick=(id,selector)=>ev('(()=>{const card=Array.from(document.querySelectorAll(".library-card")).find(node=>node.textContent.includes('+JSON.stringify(id)+'));card.querySelector('+JSON.stringify(selector)+').click()})()');
  await click('.workspace-nav button','Card box');
  await wait('!!document.querySelector("[aria-label=\\"Current view\\"]")');
  await ev('window.originalTerminal=document.querySelector(".react-flow__node-agent .xterm")');
@@ -82,8 +85,8 @@ try {
  await click('.library-pagination button','Next');
  await wait('document.querySelectorAll(".library-card").length===8');
  await fill('[aria-label="Search cards"]','crypto missing');
- await wait('document.querySelectorAll(".library-card").length===1');
- assert.ok(await ev('document.querySelector(".library-card").textContent.includes('+JSON.stringify(card.id)+')'));
+ await wait('document.querySelectorAll(".library-card").length===2');
+ assert.ok(await ev('Array.from(document.querySelectorAll(".library-card")).some(node=>node.textContent.includes('+JSON.stringify(card.id)+'))'));
  await send('Emulation.setDeviceMetricsOverride',{width:800,height:1000,deviceScaleFactor:2,mobile:false});
  assert.equal(await ev('getComputedStyle(document.querySelector(".library-grid")).gridTemplateColumns.split(" ").length'),1);
  await send('Emulation.setDeviceMetricsOverride',{width:1400,height:1000,deviceScaleFactor:1,mobile:false});
@@ -108,18 +111,18 @@ try {
  await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:agentHandle.x+90,y:agentHandle.y+50,button:'left',buttons:0,clickCount:1});
  await delay(200);const sharedAgentPosition={x:app.snapshot().agents[0].x,y:app.snapshot().agents[0].y};
  assert.ok(sharedAgentPosition.x>40,'Shared agent remains draggable');
- await ev('document.querySelector(".library-card footer button").click()');
+ await libraryClick(card.id,'footer button');
  await wait('!!document.querySelector('+JSON.stringify(nodeSelector)+')');
  assert.equal(app.snapshot().cardBox.placements.length,1);
  assert.ok(await ev('!!document.querySelector(".card-library")'));
- await ev('document.querySelector(".library-preview").click()');
+ await libraryClick(card.id,'.library-preview');
  await wait('!!document.querySelector(".library-full-preview .katex")');
  assert.equal(await ev('document.querySelectorAll(".library-preview a").length'),0);
  await ev('document.querySelector("[aria-label=\\"Close dialog\\"]").click()');
- await ev('document.querySelector(".library-card footer button").click()');
+ await libraryClick(card.id,'footer button');
  await wait('!document.querySelector('+JSON.stringify(nodeSelector)+')');
  assert.equal((await api('/cards/'+card.id)).content,content);
- await ev('document.querySelector(".library-card footer button").click()');
+ await libraryClick(card.id,'footer button');
  await wait('!!document.querySelector('+JSON.stringify(nodeSelector)+')');
  await click('.viewbar button','Rename');await fill('[aria-label="View name"]','Crypto');
  await click('.view-dialog button','Rename');
@@ -234,6 +237,26 @@ try {
  assert.ok(fits,'Fit-view must include all current-view cards/agent inside the remaining sidebar canvas');
  assert.ok(app.snapshot().cardBox.views.find(v=>v.id===active()).viewport.zoom<1);
  console.log('Current-view-only fit and viewport autosave respect sidebar dimensions');
+ // Metadata tags create exact-match temporary views; linked IDs traverse the whole component.
+ await click('.viewbar button','Library');
+ await ev('document.querySelector('+JSON.stringify(nodeSelector)+').querySelector('+JSON.stringify('[aria-label="View card metadata"]')+').click()');
+ await wait('!!Array.from(document.querySelectorAll('+JSON.stringify(nodeSelector+' .card-meta-link')+')).find(button=>button.textContent==="crypto")');
+ await ev('Array.from(document.querySelectorAll('+JSON.stringify(nodeSelector+' .card-meta-link')+')).find(button=>button.textContent==="crypto").click()');
+ await wait('document.querySelector('+JSON.stringify('[aria-label="Current view"]')+').selectedOptions[0].textContent.includes("Tag: crypto")');
+ assert.deepEqual(app.snapshot().cardBox.placements.map(p=>p.id).sort(),[card.id,tagPeer.id].sort());
+ await wait('!!document.querySelector('+JSON.stringify(nodeSelector)+')');
+ await ev('document.querySelector('+JSON.stringify(nodeSelector)+').querySelector('+JSON.stringify('[aria-label="View card metadata"]')+')?.click()');
+ await wait('!!Array.from(document.querySelectorAll('+JSON.stringify(nodeSelector+' .card-meta-link')+')).find(button=>button.textContent==='+JSON.stringify(tagPeer.id)+')');
+ const tagView=active();
+ await ev('Array.from(document.querySelectorAll('+JSON.stringify(nodeSelector+' .card-meta-link')+')).find(button=>button.textContent==='+JSON.stringify(tagPeer.id)+').click()');
+ await wait('!!document.querySelector(".view-dialog")');
+ assert.equal(active(),tagView);
+ await click('.view-dialog button','Discard and switch');
+ await wait('document.querySelector('+JSON.stringify('[aria-label="Current view"]')+').selectedOptions[0].textContent.includes("Linked: '+tagPeer.id+'")');
+ assert.deepEqual(app.snapshot().cardBox.placements.map(p=>p.id).sort(),[card.id,tagPeer.id,linkedPeer.id].sort());
+ await delay(350);
+ assert.ok(app.snapshot().cardBox.views.find(v=>v.id===active()).viewport);
+ console.log('Exact tag and recursive linked-card temporary views passed');
  if(process.env.CANVAS_SCREENSHOT)await writeFile(process.env.CANVAS_SCREENSHOT,Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));
  }
 }finally{
