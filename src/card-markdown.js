@@ -13,10 +13,11 @@ const rehypePlugins = [[rehypeKatex, {
 }]];
 
 // Zoom, viewport resize and streamed agent updates change ancestors, not math.
-export const CardMarkdown = memo(function CardMarkdown({ content }) {
+export const CardMarkdown = memo(function CardMarkdown({ content, preview = false }) {
   return createElement(Markdown, {
     skipHtml: true,
-    disallowedElements: ['img'],
+    disallowedElements: preview ? ['img', 'a'] : ['img'],
+    unwrapDisallowed: preview,
     remarkPlugins,
     rehypePlugins,
   }, content || '*Empty card*');

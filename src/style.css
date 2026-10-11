@@ -164,3 +164,53 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .toast { position: absolute; right: 24px; bottom: 24px; background: #583135; color: #fff; border-radius: 8px; padding: 12px 16px; z-index: 20; cursor: pointer; }
 @media (max-width: 900px) { .brand small, .connection { display: none; } }
 @media (max-width: 640px) { .topbar { padding: 0 8px; } .top-actions { gap: 4px; } .topbar .primary, .topbar .guide-button { padding: 4px; font-size: 9px; } }
+.flow-area { position: absolute; inset: 0; }
+.box-flow { top: 73px; }
+.with-library { left: clamp(260px, 36vw, 520px); }
+.viewbar { position: absolute; inset: 33px 0 auto; height: 40px; z-index: 10; display: flex; align-items: center; gap: 8px; padding: 4px 12px; background: #182235; border-bottom: 1px solid #35415a; overflow-x: auto; }
+.viewbar button, .viewbar select { padding: 4px 8px; font-size: 11px; white-space: nowrap; }
+.viewbar button, .card-library header button, .library-pagination button, .view-dialog button:not(.primary) { color: #d3ddf3; background: #26334b; border: 1px solid #43536e; border-radius: 5px; padding: 4px 8px; }
+.viewbar button:hover, .card-library header button:hover, .library-pagination button:hover, .view-dialog button:not(.primary):hover { background: #354560; }
+.viewbar button[aria-pressed=true] { border-color: #a5a7fa; }
+.viewbar { scrollbar-width: none; }
+.viewbar::-webkit-scrollbar { display: none; }
+.viewbar label { display: flex; align-items: center; gap: 6px; white-space: nowrap; font-size: 12px; }
+.viewbar select { max-width: 220px; color: #e1e7f5; background: #263249; border: 1px solid #46546c; border-radius: 5px; }
+.view-state { font-size: 11px; white-space: nowrap; color: #a8b7d1; margin-left: auto; }
+.card-library { position: absolute; top: 73px; bottom: 0; left: 0; width: clamp(260px, 36vw, 520px); z-index: 9; padding: 12px; overflow-y: auto; background: #182235; border-right: 1px solid #35415a; }
+.card-library header { display: flex; align-items: center; justify-content: space-between; }
+.card-library h2 { font-size: 16px; margin: 0 0 12px; }
+.card-library { color-scheme: dark; scrollbar-width: thin; scrollbar-color: #43536e #182235; }
+.card-library input { width: 100%; background: #101724; color: #e7edfa; border: 1px solid #43536e; border-radius: 6px; padding: 8px; font-size: 12px; }
+.card-library input::placeholder { color: #94a4c0; }
+.card-library > p { font-size: 11px; color: #a8b7d1; }
+.library-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(210px, 100%), 1fr)); gap: 10px; }
+.library-card { min-width: 0; border-radius: 8px; overflow: hidden; background: #e5eafb; color: #202a40; }
+.library-preview { display: flex; flex-direction: column; align-items: stretch; justify-content: flex-start; width: 100%; height: 155px; overflow: hidden; padding: 4px 0; text-align: left; border: 0; border-radius: 0; background: transparent; color: inherit; font-size: 12px; }
+.library-preview:hover { background: #dbe3f8; }
+.library-thumbnail { width: 100%; height: 80px; object-fit: contain; }
+.library-audio { display: block; padding: 4px 12px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-size: 11px; }
+.library-preview .card-markdown { pointer-events: none; }
+.library-preview .card-markdown h1 { font-size: 1.3em; }
+.library-preview .card-markdown h2 { font-size: 1.15em; }
+.library-card footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; border-top: 1px solid #bec8df; padding: 6px; font-size: 10px; }
+.library-card footer button { font-size: 10px; padding: 4px 6px; color: #35477b; background: #f3f5fc; border: 1px solid #b6c2df; border-radius: 5px; }
+.library-card footer button:hover { background: #d5def7; }
+.library-tags { padding: 0 6px 6px; font-size: 10px; overflow-wrap: anywhere; }
+.library-pagination, .view-dialog-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; }
+.view-dialog-actions { justify-content: flex-end; flex-wrap: wrap; }
+.view-dialog label { display: flex; flex-direction: column; gap: 8px; }
+.view-dialog h2 { font-size: 18px; }
+.library-full-preview { height: min(65vh, 700px); display: flex; }
+.library-full-preview .card-face { border-radius: 8px; color: #202a40; background: #e5eafb; }
+.library-full-preview .card-body { font-size: 14px; }
+.app.is-maximized .viewbar, .app.is-maximized .card-library { display: none; }
+.app.is-maximized .flow-area { inset: 0; }
+@media (max-width: 640px) {
+  .with-library { left: 52vw; }
+  .card-library { width: 52vw; padding: 8px; }
+  .viewbar { gap: 4px; padding: 4px 8px; }
+  .viewbar select { max-width: 140px; }
+  .view-state { display: none; }
+  .library-grid { grid-template-columns: 1fr; }
+}

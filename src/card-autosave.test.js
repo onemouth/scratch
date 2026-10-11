@@ -58,6 +58,26 @@ test('links parse comma/whitespace-separated IDs and reject invalid formats', ()
   assert.throws(() => cardDraft('', '', 'not-an-id'), /Links/);
 });
 
+test('view departure flushes a pending valid draft but never sends invalid content', async () => {
+  const writes = [];
+  const create = () => createCardAutosaver({ initial: { content: '', tags: [] }, delay: 100, save: async value => writes.push(value.content), onStatus: () => {} });
+  const valid = create(); valid.update('pending', ''); valid.dispose({ flush: true });
+  await sleep(20); assert.deepEqual(writes, ['pending']);
+  const invalid = create(); invalid.update('中'.repeat(401), ''); invalid.dispose({ flush: true });
+  await sleep(20); assert.deepEqual(writes, ['pending']);
+});
+
+test('view departure finishes serialized writes with the latest draft', async () => {
+  const writes = [];
+  let finish;
+  const saver = createCardAutosaver({ initial: { content: '', tags: [] }, delay: 5,
+    save: value => { writes.push(value.content); return new Promise(resolve => { finish = resolve; }); }, onStatus: () => {} });
+  saver.update('older', ''); await sleep(20);
+  saver.update('latest', ''); saver.dispose({ flush: true });
+  finish(); await sleep(20); assert.deepEqual(writes, ['older', 'latest']);
+  finish(); await sleep(20); assert.equal(saver.isDirty(), false);
+});
+
 test('disposal cancels pending debounce', async () => {
   let writes = 0;
   const saver = createCardAutosaver({ initial: { content: '', tags: [] }, delay: 5, save: async () => writes++, onStatus: () => {} });

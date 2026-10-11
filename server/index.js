@@ -2,7 +2,8 @@ import http from 'node:http';
 import { parsePublicOrigin } from './public-origin.js';
 import { initializeMedia, storeMediaUpload, serveMedia } from './card-media-store.js';
 import { CardStore } from './card-store.js';
-import { syncCardBoxPlacements } from './card-box-layout.js';
+import { CardViews, validateViewport } from './card-views.js';
+import { searchCards } from '../shared/card-search.js';
 import { storagePaths } from './storage-paths.js';
 import { lockCanvas, loadCanvas, saveCanvas } from './canvas-store.js';
 import pty from 'node-pty';
@@ -66,7 +67,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   const edges = new Map();
   const notes = new Map();
   const cardPlacements = new Map();
-  const boxPlacements = new Map();
+  let views;
   let cards;
   const clients = new Set();
   const terminals = new Map();
@@ -82,7 +83,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   let saveError = '';
   const runs = new Map();
   const activity = new Map();
-  const snapshot = (live = true) => ({ agents: [...agents.values()].map(agent => live ? { ...agent, activity: activity.get(agent.id)?.state ?? 'unknown' } : agent), edges: [...edges.values()], notes: [...notes.values()], cardPlacements: [...cardPlacements.values()], cardBox: { placements: [...boxPlacements.values()] }, ...(live ? { cards: cards?.list() ?? [] } : {}), persistence: { enabled: !!stateFile, error: saveError } });
+  const snapshot = (live = true) => ({ agents: [...agents.values()].map(agent => live ? { ...agent, activity: activity.get(agent.id)?.state ?? 'unknown' } : agent), edges: [...edges.values()], notes: [...notes.values()], cardPlacements: [...cardPlacements.values()], cardBox: views?.snapshot({ live }) ?? { placements: [] }, ...(live ? { cards: cards?.list() ?? [] } : {}), persistence: { enabled: !!stateFile, error: saveError } });
   const flush = () => {
     clearTimeout(saveTimer);
     saveTimer = undefined;
@@ -92,6 +93,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   };
   const broadcast = () => {
     if (closing || resetting) return;
+    if (views) views.revision++;
     if (stateFile) { clearTimeout(saveTimer); saveTimer = setTimeout(() => { flush(); publish(); }, 250); }
     publish();
   };
@@ -338,7 +340,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
         }
         const boxPlacementMatch = url.pathname.match(/^\/api\/card-box\/placements\/([^/]+)$/);
         if (boxPlacementMatch && req.method === 'PATCH') {
-          const placement = boxPlacements.get(boxPlacementMatch[1]);
+          const placement = views.active.placements.get(boxPlacementMatch[1]);
           if (!placement) return reply(res, 404, { error: 'Card box placement not found' });
           const updates = {};
           for (const [key, value] of Object.entries(body)) {
@@ -347,12 +349,48 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           }
           Object.assign(placement, updates); broadcast(); return reply(res, 200, placement);
         }
-        if (url.pathname === '/api/cards' && req.method === 'GET') return reply(res, 200, { cards: cards.list() });
+        if (url.pathname === '/api/card-box/views' && req.method === 'GET') return reply(res, 200, views.snapshot());
+        if (url.pathname === '/api/card-box/views' && req.method === 'POST') {
+          if (Object.keys(body).some(k => !['name', 'cardIds', 'fromViewId', 'temporaryAction', 'saveName'].includes(k))) throw new Error('Invalid view creation fields');
+          views.create(body, cards.list()); broadcast(); return reply(res, 201, views.snapshot());
+        }
+        const viewMatch = url.pathname.match(/^\/api\/card-box\/views\/([^/]+)(?:\/(activate|save|cards|viewport)(?:\/([^/]+))?)?$/);
+        if (viewMatch) {
+          const [, id, action, memberId] = viewMatch;
+          const view = views.get(id);
+          if (memberId && action !== 'cards') return reply(res, 404, { error: 'Unknown view operation' });
+          const allowed = action === 'activate' ? ['fromViewId','temporaryAction','saveName'] : action === 'save' ? ['name'] : action === 'viewport' ? ['x','y','zoom'] : action === 'cards' && req.method === 'PATCH' ? ['x','y','width','height'] : action === 'cards' ? [] : req.method === 'DELETE' ? ['confirm','fromViewId'] : ['name'];
+          if (Object.keys(body).some(k => !allowed.includes(k))) throw new Error('Invalid view operation fields');
+          if (!action && req.method === 'PATCH') {
+            if (Object.keys(body).some(k => k !== 'name')) throw new Error('Only view name is editable');
+            views.rename(id, body.name);
+          } else if (!action && req.method === 'DELETE') views.remove(id, body);
+          else if (action === 'activate' && req.method === 'POST') views.activate(id, body);
+          else if (action === 'save' && req.method === 'POST') views.save(id, body.name);
+          else if (action === 'viewport' && req.method === 'PATCH') view.viewport = validateViewport(body);
+          else if (action === 'cards' && memberId && req.method === 'POST') views.add(id, cards.get(memberId));
+          else if (action === 'cards' && memberId && req.method === 'DELETE') view.placements.delete(memberId);
+          else if (action === 'cards' && memberId && req.method === 'PATCH') {
+            const placement = view.placements.get(memberId);
+            if (!placement) return reply(res, 404, { error: 'View placement not found' });
+            for (const [k, v] of Object.entries(body)) if (!['x','y','width','height'].includes(k) || !Number.isFinite(v) || (['width','height'].includes(k) && v < 240)) throw new Error('Invalid placement dimensions');
+            Object.assign(placement, body);
+          } else return reply(res, 405, { error: 'Unsupported view operation' });
+          broadcast(); return reply(res, 200, views.snapshot());
+        }
+        if (url.pathname === '/api/cards' && req.method === 'GET') {
+          const all = cards.list();
+          if (!url.searchParams.has('q')) return reply(res, 200, { cards: all });
+          const matches = searchCards(all, url.searchParams.get('q'));
+          const limit = Number(url.searchParams.get('limit') ?? 24), offset = Number(url.searchParams.get('offset') ?? 0);
+          if (!Number.isInteger(limit) || limit < 1 || limit > 100 || !Number.isInteger(offset) || offset < 0) throw new Error('Invalid search pagination');
+          return reply(res, 200, { cards: matches.slice(offset, offset + limit), total: matches.length, limit, offset });
+        }
         if (url.pathname === '/api/cards' && req.method === 'POST') {
           if (Object.keys(body).some(key => !['content', 'tags', 'links', 'place'].includes(key))) throw new Error('Allowed fields: content, tags, links, place');
           if (body.place !== undefined && typeof body.place !== 'boolean') throw new Error('place must be boolean');
           const card = cards.create(body);
-          syncCardBoxPlacements(boxPlacements, cards.list());
+          views.add(views.activeViewId, card);
           if (body.place !== false) cardPlacements.set(card.id, { id: card.id, cardId: card.id, x: 0, y: 0, width: 340, height: 320 });
           broadcast(); return reply(res, 201, card);
         }
@@ -366,7 +404,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           }
           if (req.method === 'DELETE') {
             if (body.confirm !== true) throw new Error('Permanent deletion requires confirm: true');
-            cards.delete(id); cardPlacements.delete(id); boxPlacements.delete(id); broadcast(); return reply(res, 200, { ok: true });
+            cards.delete(id); cardPlacements.delete(id); views.prune(cards.list()); broadcast(); return reply(res, 200, { ok: true });
           }
         }
         const placeCard = url.pathname.match(/^\/api\/cards\/([^/]+)\/placement$/);
@@ -561,12 +599,11 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
         for (const note of saved.notes) notes.set(note.id, note);
         const cardIds = new Set(cards.list().map(card => card.id));
         for (const placement of saved.cardPlacements || []) if (cardIds.has(placement.cardId)) cardPlacements.set(placement.id, placement);
-        for (const placement of saved.cardBox?.placements || []) if (cardIds.has(placement.cardId)) boxPlacements.set(placement.id, placement);
       }
       try {
+        views = new CardViews(saved?.cardBox, cards.list());
         await new Promise((resolveListen, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolveListen); });
       } catch (error) { cards.close(); unlockCards(); unlock(); throw error; }
-      syncCardBoxPlacements(boxPlacements, cards.list());
       started = true;
       for (const agent of agents.values()) {
         if (agent.status !== 'running') { agent.status = 'stopped'; continue; }

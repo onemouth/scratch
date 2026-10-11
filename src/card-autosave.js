@@ -16,12 +16,13 @@ export function createCardAutosaver({ initial, save, onStatus, delay = 500 }) {
   let timer;
   let running = false;
   let disposed = false;
+  let finishing = false;
   let invalid = '';
   const dirty = () => !!invalid || JSON.stringify(draft) !== acknowledged;
   const report = (state, error = '') => { if (!disposed) onStatus({ state, error }); };
   const send = async () => {
     timer = undefined;
-    if (disposed || running || invalid || !dirty()) return;
+    if ((disposed && !finishing) || running || invalid || !dirty()) return;
     running = true;
     const sent = JSON.stringify(draft), sentRevision = revision;
     report('saving');
@@ -33,7 +34,7 @@ export function createCardAutosaver({ initial, save, onStatus, delay = 500 }) {
       if (revision === sentRevision) report('error', error.message);
     } finally {
       running = false;
-      if (!disposed && revision !== sentRevision && !invalid && dirty() && !timer) timer = setTimeout(send, delay);
+      if ((!disposed || finishing) && revision !== sentRevision && !invalid && dirty() && !timer) timer = setTimeout(send, delay);
     }
   };
   return {
@@ -47,6 +48,9 @@ export function createCardAutosaver({ initial, save, onStatus, delay = 500 }) {
       report('saving');
       timer = setTimeout(send, delay);
     },
-    dispose() { disposed = true; clearTimeout(timer); },
+    dispose({ flush = false } = {}) {
+      disposed = true; clearTimeout(timer); timer = undefined;
+      if (flush && !invalid && dirty()) { finishing = true; if (!running) void send(); }
+    },
   };
 }

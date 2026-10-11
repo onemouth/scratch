@@ -13,18 +13,28 @@ async function request(path, method, body) {
   if (!response.ok) throw new Error(value.error);
   return value;
 }
+// Unmounted view cards retain drafts in this page, not in persistent storage.
+const cardDrafts = new Map();
+export function reconcileCardDrafts(cards) {
+  const ids = new Set(cards.map(c => c.id));
+  for (const [key, draft] of cardDrafts) if (!ids.has(draft.cardId)) cardDrafts.delete(key);
+}
 function CardIcon({ type }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
     {type === 'flip' ? <><rect x="7" y="7" width="13" height="13" rx="2" /><path d="M16 4H4v12M4 4l4 4" /></> : type === 'edit' ? <><path d="m4 16 12-12 4 4-12 12-5 1zM14 6l4 4" /></> : type === 'done' ? <path d="m5 12 4 4L19 6" /> : type === 'add' ? <path d="M12 5v14M5 12h14" /> : <path d="m5 5 14 14M19 5 5 19" />}
   </svg>;
 }
-export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = false, onDelete, fontSize, draggable = false }) {
+export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = false, onDelete, fontSize, draggable = false, draftScope = 'agents', removeFromView = false }) {
   const media = useCardUpload(card);
-  const [back, setBack] = useState(false);
-  const [editing, setEditing] = useState(!readOnly && !card.content);
-  const [content, setContent] = useState(card.content);
-  const [tags, setTags] = useState(card.tags.join(', '));
-  const [links, setLinks] = useState((card.links || []).join(', '));
+  const draftKey = draftScope + ':' + card.id;
+  const restored = useRef(readOnly ? null : cardDrafts.get(draftKey));
+  const [back, setBack] = useState(restored.current?.back ?? false);
+  const [editing, setEditing] = useState(restored.current?.editing ?? (!readOnly && !card.content));
+  const [content, setContent] = useState(restored.current?.content ?? card.content);
+  const [tags, setTags] = useState(restored.current?.tags ?? card.tags.join(', '));
+  const [links, setLinks] = useState(restored.current?.links ?? (card.links || []).join(', '));
+  const latest = useRef(null);
+  latest.current = { cardId: card.id, content, tags, links, back, editing };
   const [status, setStatus] = useState({ state: 'saved', error: '' });
   const autosaver = useRef(null);
   useEffect(() => {
@@ -32,10 +42,15 @@ export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = fal
     const saver = createCardAutosaver({
       initial: { content: card.content, tags: card.tags, links: card.links || [] },
       save: draft => request('/cards/' + card.id, 'PATCH', draft),
-      onStatus: setStatus,
+      onStatus: value => { setStatus(value); if (value.state === 'saved') cardDrafts.delete(draftKey); },
     });
     autosaver.current = saver;
-    return () => { saver.dispose(); autosaver.current = null; };
+    if (restored.current) saver.update(content, tags, links);
+    return () => {
+      if (saver.isDirty()) cardDrafts.set(draftKey, latest.current);
+      else cardDrafts.delete(draftKey);
+      saver.dispose({ flush: true }); autosaver.current = null;
+    };
   }, [card.id, readOnly]);
   useEffect(() => {
     if (!autosaver.current?.isDirty()) {
@@ -53,7 +68,7 @@ export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = fal
       <button type="button" className="card-icon nodrag" title={back ? 'View content' : 'View metadata'} aria-label={back ? 'View card content' : 'View card metadata'} aria-pressed={back} onClick={() => setBack(value => !value)}><CardIcon type="flip" /></button>
       {!readOnly && <button type="button" className="card-icon nodrag" title={editing ? 'Done editing' : 'Edit card'} aria-label={editing ? 'Done editing card' : 'Edit card'} aria-pressed={editing} onClick={() => setEditing(value => !value)}><CardIcon type={editing ? 'done' : 'edit'} /></button>}
       {onAdd && <button type="button" className="card-icon nodrag" title="Add to Agent Canvas" aria-label="Add card to Agent Canvas" disabled={adding} onClick={onAdd}><CardIcon type="add" /></button>}
-      {onRemove && <button type="button" className="card-icon nodrag" title="Remove from Canvas (keeps card)" aria-label="Remove card from Canvas" onClick={onRemove}><CardIcon type="remove" /></button>}
+      {onRemove && <button type="button" className="card-icon nodrag" title={removeFromView ? "Remove from current view (keeps library card)" : "Remove from Canvas (keeps card)"} aria-label={removeFromView ? "Remove card from current view" : "Remove card from Canvas"} onClick={onRemove}><CardIcon type="remove" /></button>}
     </header>
     <div className="card-body nodrag" style={fontSize === undefined ? undefined : { fontSize }}>
       {back ? <div className="card-meta"><dl><dt>ID</dt><dd>{card.id}</dd><dt>Tags</dt><dd>{editing ? <input aria-label="Card tags" placeholder="tag, tag" value={tags} onChange={e => setTags(e.target.value)} /> : tags.trim() ? [...new Set(tags.split(',').map(tag => tag.trim()).filter(Boolean))].map(tag => <span className="card-tag" key={tag}>{tag}</span>) : '—'}</dd><dt title="Links are bidirectional: adding or removing one updates both cards.">Links ↔</dt><dd>{editing ? <input aria-label="Card links" placeholder="2026-10-03-0001, 2026-10-03-0002" value={links} onChange={e => setLinks(e.target.value)} /> : links.trim() ? [...new Set(links.split(/[,\s]+/).filter(Boolean))].map(id => <span className="card-tag" key={id}>{id}</span>) : '—'}</dd><CardAttachmentInfo card={card} onRemove={media.remove} busy={media.status.busy || readOnly} /></dl></div>
@@ -73,13 +88,14 @@ export function CardNode({ id, data, selected }) {
   const { fontSize } = cardTypography(width, zoom);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
+  const resizeView = useRef(null);
   const add = async () => {
     setAdding(true); setError('');
     try { await request('/cards/' + data.card.id + '/placement', 'POST', {}); }
     catch (e) { setError(e.message); }
     finally { setAdding(false); }
   };
-  const placementPath = data.cardBox ? '/card-box/placements/' + data.card.id : '/card-placements/' + data.card.id;
+  const placementPath = data.cardBox ? (data.viewId ? '/card-box/views/' + data.viewId + '/cards/' + data.card.id : '/card-box/placements/' + data.card.id) : '/card-placements/' + data.card.id;
   const remove = async () => {
     try { await request(placementPath, 'DELETE', {}); }
     catch (e) { setError(e.message); }
@@ -90,9 +106,12 @@ export function CardNode({ id, data, selected }) {
     catch (e) { setError(e.message); }
   };
   return <>
-    <NodeResizer isVisible={selected} minWidth={240} minHeight={240} onResizeEnd={(_, p) => request(placementPath, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message))} />
+    <NodeResizer isVisible={selected} minWidth={240} minHeight={240} onResizeStart={() => { resizeView.current = data.viewId; }} onResizeEnd={(_, p) => {
+      if (data.cardBox && resizeView.current !== data.viewId) { queueMicrotask(() => data.restorePlacement(id, data.placement)); return; }
+      request(placementPath, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message));
+    }} />
     <section className="zettel-card">
-      <CardFace card={data.card} onRemove={data.cardBox ? undefined : remove} onAdd={data.cardBox && !data.inAgentCanvas ? add : undefined} adding={adding} onDelete={destroy} fontSize={fontSize} draggable />
+      <CardFace card={data.card} onRemove={data.cardBox && !data.viewId ? undefined : remove} onAdd={data.cardBox && !data.inAgentCanvas ? add : undefined} adding={adding} onDelete={destroy} fontSize={fontSize} draftScope={data.cardBox ? 'card-box' : 'agents'} removeFromView={!!data.cardBox} draggable />
       {error && <div className="node-error" role="alert">{error}</div>}
     </section>
   </>;

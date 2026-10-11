@@ -26,17 +26,21 @@ For a manual end-to-end check: choose a saved Pi session folder from the workdir
 
 For persistence checks, set both `AGENT_CANVAS_STATE_FILE` and `AGENT_CANVAS_CARDS_FILE` to temporary paths. The CLI otherwise uses the shared default card database even with a custom Canvas path. Create nodes and notes, restart the server, and verify the same IDs/layout return and running nodes reopen conversations without a task. Stop one node before restarting and verify it stays stopped. Test a missing session/workdir, then Reset Canvas and restart again to confirm it stays empty. Never run reset tests against your working Canvas.
 
-For isolated card-box testing without changing the live Canvas:
+For isolated card library/view browser testing without changing the live Canvas:
 
 ```sh
-npm run build
-TEST_DIR=$(mktemp -d)
-PORT=3002 AGENT_CANVAS_STATE_FILE="$TEST_DIR/canvas.json" \
-  AGENT_CANVAS_CARDS_FILE="$TEST_DIR/cards.sqlite" npm start
-# Open http://127.0.0.1:3002
+npm run test:views:browser
+# Interactive disposable preview (prints an ephemeral localhost URL; fake echo agent, not Pi):
+CANVAS_PREVIEW=1 npm run test:views:browser
+# Optional Chrome path on another platform:
+CHROME_BIN=/path/to/chrome npm run test:views:browser
+# Optional screenshot of fixture UI:
+CANVAS_SCREENSHOT=/tmp/card-views.png npm run test:views:browser
 ```
 
-Test card creation, content/metadata editing and flipping, debounced auto-save, over-limit draft preservation and save blocking, Markdown rendering, reload retention, placement removal without library deletion, permanent deletion confirmation, and Reset preserving the library. Card box is a separate editable whiteboard, showing all library cards and at most one fixed agent. Check mode switching preserves terminal DOM/connection, saved layout independence, append-only grid placement, singleton launch, stop/resume, exact-session restore and Agent Canvas reset isolation. No query/filter or selected-card interaction is included. Version-2 Canvas files are not readable by the pre-card-box branch.
+This launches an ephemeral loopback API/Vite middleware server, temporary JSON/SQLite/media/cache/session directories, one fake PTY (never Pi/model calls), and an owned headless Chrome profile. It never opens live Canvas data or ports. The test-only proxy strips Origin because the ephemeral Vite port is not a production allowlisted origin; production origin enforcement is unchanged. The fixture closes its owned servers/browser and removes temporary data, including on SIGINT/SIGTERM. Preview mode skips Chrome automation, keeps only its isolated API/Vite/fake PTY running until Ctrl+C, and never invokes a model. Do not restart a working Canvas just to test the branch; new backend endpoints/schema migration take effect on a later deliberate normal startup.
+
+Test card creation, content/metadata editing and flipping, debounced auto-save, over-limit draft preservation and save blocking, Markdown rendering, reload retention, placement removal without library deletion, permanent deletion confirmation, and Reset preserving the library. Card box is a separate editable whiteboard, showing current-view cards and one shared fixed agent. Check mode switching preserves terminal DOM/connection, saved layout independence, append-only grid placement, singleton launch, stop/resume, exact-session restore and Agent Canvas reset isolation. Also test OR content/tag/ID search, pagination, responsive previews, named temporary/saved views, confirmation choices, universal new-card current-view membership, independent layouts/viewports, rename/deletion, reload/restart recovery and cross-tab selection/stale-dialog protection. Schema-1/2 Canvas JSON migrates to 3; old code cannot read 3. Never run migration tests on live data.
 
 Media checks: use isolated data. Test real file drops in both modes, image+audio ordering, confirmation/cancel for replacements, image preview, audio seek and mode continuity, one-player behavior, independent invalid text drafts, stale replacement/removal conflicts, range responses and metadata persistence after restart. Accepted files must remain after replacement, unlinking, card deletion and reset. Invalid/aborted uploads must leave no staging files or changed associations. Test schema-3→4 migration without changing existing cards/links/sequences; older code rejects the new database schema. Backups need the entire images/ and audios/ directories as well as JSON/SQLite.
 
@@ -60,6 +64,9 @@ Media checks: use isolated data. Test real file drops in both modes, image+audio
 - `src/card-media.jsx`, `src/card-audio.js`, `src/card-audio.test.js` — attachment UI and shared playback state.
 - `shared/card-content.js` — shared Markdown validation and 400-unit counter.
 - `src/cards.jsx` — front/back editable cards shared by both workspace modes.
+- `server/card-views.js`, `server/card-views.test.js` — view lifecycle, atomic temporary transitions, independent layouts, old-save migration and persistence.
+- `shared/card-search.js`, `shared/card-search.test.js` — Unicode-normalized OR library search.
+- `src/card-views.jsx`, `scripts/tests/card-views-browser.mjs` — sidebar/view dialogs and isolated browser verification.
 - `server/card-box-layout.js`, `server/card-box.test.js` — append-only grid placement and fixed-agent/layout lifecycle tests.
 - `src/main.jsx` — canvas and terminal browser UI.
 - `src/agent-state.js`, `src/agent-state.test.js` — immediate successful launch inclusion without relying on SSE, duplicate prevention and preservation of newer streamed state.
@@ -69,4 +76,4 @@ Media checks: use isolated data. Test real file drops in both modes, image+audio
 
 ## Current scope
 
-No multiple named canvases, multi-user access, automatic agent-to-agent message forwarding or workflow scheduler. Explicit messages to existing running nodes use `POST /api/messages` and write to their TTYs; a successful response does not prove the recipient processed the text. The single Canvas is auto-saved to a local JSON file; cards live in a separate SQLite library, while their placements are saved with the Canvas. Pi sessions are saved by Pi; Canvas restore reopens the exact conversation when available, falling back to `pi -r` without replaying interrupted work. Keep UI coordinates out of instructions to agents: agents describe work and delegation, while the browser controls spatial layout. See [architecture](architecture.md) and [agent API guide](agent-api.md) for details.
+Card box supports named shared views, not multiple Agent Canvases or separate per-user views. No authentication/per-user isolation, automatic agent-to-agent message forwarding or workflow scheduler. Explicit messages to existing running nodes use `POST /api/messages` and write to their TTYs; a successful response does not prove the recipient processed the text. The single Canvas is auto-saved to a local JSON file; cards live in a separate SQLite library, while their placements are saved with the Canvas. Pi sessions are saved by Pi; Canvas restore reopens the exact conversation when available, falling back to `pi -r` without replaying interrupted work. Keep UI coordinates out of instructions to agents: agents describe work and delegation, while the browser controls spatial layout. See [architecture](architecture.md) and [agent API guide](agent-api.md) for details.

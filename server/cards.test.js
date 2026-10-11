@@ -29,7 +29,7 @@ test('card API, placement persistence, removal, reset and permanent deletion', a
     assert.equal(app.snapshot().cardPlacements[0].x, 99);
     await app.close();
     const saved = JSON.parse(await readFile(stateFile, 'utf8'));
-    assert.equal(saved.version, 2);
+    assert.equal(saved.version, 3);
     assert.equal(saved.cards, undefined);
     assert.equal(saved.cardPlacements[0].x, 99);
     app = createApp({ port: 0, stateFile });

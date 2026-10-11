@@ -1,11 +1,13 @@
 import { existsSync, readFileSync, mkdirSync, openSync, writeFileSync, fsyncSync, closeSync, renameSync, copyFileSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
+import { validateViewState } from './card-views.js';
 
 export function validateCanvas(value) {
   const fail = () => { throw new Error('Invalid or unsupported Canvas save file'); };
-  if (!value || ![1, 2].includes(value.version)) fail();
-  if (value.version === 2 && !Array.isArray(value.cardPlacements)) fail();
+  if (!value || ![1, 2, 3].includes(value.version)) fail();
+  if (value.version >= 2 && !Array.isArray(value.cardPlacements)) fail();
+  if (value.version === 3) { try { validateViewState(value.cardBox); } catch { fail(); } }
   const ids = new Set();
   for (const kind of ['agents', 'notes', 'edges']) {
     if (!Array.isArray(value[kind])) fail();
@@ -73,7 +75,7 @@ export function loadCanvas(file) {
 
 export function saveCanvas(file, state) {
   if (!file) return;
-  const value = validateCanvas({ ...state, cardPlacements: state.cardPlacements || [], version: 2 });
+  const value = validateCanvas({ ...state, cardPlacements: state.cardPlacements || [], version: state.cardBox?.views ? 3 : 2 });
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.tmp`;
   const fd = openSync(temporary, 'w', 0o600);

@@ -9,7 +9,8 @@
     "build": "vite build",
     "start": "node server/index.js",
     "tailscale:setup": "node scripts/tailscale-setup.js",
-    "test": "node --test"
+    "test": "node --test",
+    "test:views:browser": "node scripts/tests/card-views-browser.mjs"
   },
   "dependencies": {
     "@xterm/addon-fit": "^0.11.0",

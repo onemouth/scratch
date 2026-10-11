@@ -28,6 +28,11 @@ test('ordinary Markdown, literal code and escaped dollar amounts are preserved',
   assert.match(render(''), /<em>Empty card<\/em>/);
 });
 
+test('library excerpts keep link text and formulas without interactive nested links', () => {
+  const html = renderToStaticMarkup(createElement(CardMarkdown, { content: '[Reference](https://example.com) $x$', preview: true }));
+  assert.match(html, /Reference/); assert.match(html, /katex/); assert.doesNotMatch(html, /<a\b/);
+});
+
 test('math fences render and malformed math remains readable without throwing', () => {
   assert.match(render('```math\n\\sum_{i=1}^n x_i\n```'), /katex-display/);
   const html = render('Before $\\frac{a}{$ after.');

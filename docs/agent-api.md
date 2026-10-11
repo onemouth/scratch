@@ -16,13 +16,13 @@ You can use the Agent Canvas API to observe the shared canvas, create Pi agents,
 curl -fsS "$AGENT_CANVAS_URL/api/state"
 ```
 
-Returns `{ "agents": [...], "edges": [...], "notes": [...], "cards": [...], "cardPlacements": [...], "cardBox": { "placements": [...] }, "persistence": { "enabled": true, "error": "" } }`. Agents have `workspace` (`agents` or `card-box`; absent on older records means `agents`), `id`, `name`, `workdir`, `task`, process `status` (`running` or `stopped`), live `activity` (`unknown`, `working`, or `idle`), `note`, recent raw terminal `output`, and layout fields. `activity` is transient and resets to `unknown` on restart until Pi reports its state; an `idle` agent is available for more work, not stopped. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
+Returns `{ "agents": [...], "edges": [...], "notes": [...], "cards": [...], "cardPlacements": [...], "cardBox": { "epoch": "...", "revision": 0, "activeViewId": "...", "placements": [...], "views": [...] }, "persistence": { "enabled": true, "error": "" } }`. Agents have `workspace` (`agents` or `card-box`; absent on older records means `agents`), `id`, `name`, `workdir`, `task`, process `status` (`running` or `stopped`), live `activity` (`unknown`, `working`, or `idle`), `note`, recent raw terminal `output`, and layout fields. `activity` is transient and resets to `unknown` on restart until Pi reports its state; an `idle` agent is available for more work, not stopped. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
 
 ## Card box
 
 Cards are independent of sticky notes. Read all cards with `GET /api/cards` (returns `{cards: [...]}`, newest ID first), or one with `GET /api/cards/:id`. A card contains `id`, `content`, `tags`, `links`, `units`, nullable `image`/`audio` attachment metadata, `createdAt`, and `updatedAt`. IDs are assigned by the server from its local date plus a daily non-reused sequence (`YYYY-MM-DD-0001`) and cannot be changed.
 
-- `POST /api/cards`: `{"content":"**One idea**","tags":["reading"],"links":["<EXISTING_CARD_ID>"],"place":true}`. Returns the card (201). All fields are optional; defaults are empty content/tags/links and `place:true`. With `place:false`, the card has no Agent Canvas node, but still appears automatically in Card box.
+- `POST /api/cards`: `{"content":"**One idea**","tags":["reading"],"links":["<EXISTING_CARD_ID>"],"place":true}`. Returns the card (201). All fields are optional; defaults are empty content/tags/links and `place:true`. Every new card joins the shared current Card box view, regardless of whether it was created by UI or API. With `place:false`, it has no Agent Canvas node. Other Card box views are unchanged.
 - `PATCH /api/cards/:id`: update only `content`, `tags` and/or `links`; returns the updated card. Updates are atomic; invalid content, tags or links change nothing.
 - `DELETE /api/cards/:id`: requires `{"confirm":true}`; **permanently deletes** the card and any placement.
 - `POST /api/cards/:id/placement` with `{}`: place an existing library card on the Canvas, idempotently. Returns its placement. Each card has at most one placement in Agent Canvas, independent of its Card box placement.
@@ -48,13 +48,33 @@ Files live in `images/` and `audios/` alongside SQLite. Replacing/unlinking atta
 
 ## Card box workspace lifecycle (human UI)
 
-Card box automatically displays every library card with its own persisted placement in `state.cardBox.placements`. New cards receive an initial free grid position; existing layouts are never rearranged. Permanent deletion removes both placements.
+Card box displays only the shared current view's cards in `state.cardBox.placements`. New library cards join this view in free grid slots without rearranging existing cards. Permanent card deletion removes its Agent Canvas placement and memberships in every view. Switching views does not change the shared Card box agent's session, terminal, position or size.
 
 - `POST /api/card-box/agent` with `{}`: create its single fixed New-session Pi agent in the database directory. Returns 201; subsequent launch attempts return 409. The agent appears in `state.agents` with `workspace: "card-box"`.
 - Use existing `/api/agents/:id/stop` and `/resume` for its lifecycle. Removal is rejected (409); delegation to/from it is rejected (400), including creating a child with its `parentId`.
-- `PATCH /api/card-box/placements/:cardId`: human UI position/size updates; minimum size 240. No placement-removal endpoint: all library cards appear here. **Agents must not modify coordinates.**
+- `PATCH /api/card-box/placements/:cardId`: compatibility endpoint for human layout updates in the current view. New clients should use the explicitly view-scoped route below to avoid updating a different view after a switch.
 
-Switching workspaces does not stop agents. Agent Canvas reset preserves Card box agent, layout and library. These endpoints support the workspace UI; no query API or selected-card-to-agent interaction is introduced. Use card APIs, never directly edit SQLite, Canvas JSON or lock files.
+Switching workspaces does not stop agents. Agent Canvas reset preserves Card box agent, views and library. Use APIs, never directly edit SQLite, Canvas JSON, backup or lock files.
+
+## Card library search and views
+
+First fetch `GET /api/card-box/views`. If it returns 404, this running backend has not loaded the view feature: tell the human and do not guess endpoints, alter files, or restart agents yourself.
+
+- `GET /api/cards?q=<URL_ENCODED_QUERY>&limit=24&offset=0`: returns `{cards,total,limit,offset}`, newest ID first. Search matches **any** whitespace-separated term (OR), case-insensitive Unicode-normalized substring matching over content, tags and ID. Empty query browses the library. Query ≤1,000 characters; limit 1–100; offset ≥0. Without `q`, the existing endpoint still returns all cards. Search is literal, not a natural-language or fuzzy search engine; agents interpret the user's intent and select relevant IDs.
+- `GET /api/card-box/views`: returns `{epoch,revision,activeViewId,placements,views}`. Each view has `{id,name,saved,viewport,placements}`. IDs are opaque server-assigned values. The top-level placements mirror the current view. All browsers/agents share the active view; workspace selection remains local to each browser.
+- `POST /api/card-box/views`: `{"name":"Cryptography","cardIds":["<EXISTING_CARD_ID>"],"fromViewId":"<CURRENT_VIEW_ID>"}`. Creates and activates a **temporary** view (201). Name and cardIds are optional; defaults are unnamed and empty. Existing cards are not copied or edited; other views retain their memberships/layouts. New view cards receive server-selected initial slots, not agent-provided coordinates.
+- `POST /api/card-box/views/:id/activate`: `{"fromViewId":"<CURRENT_VIEW_ID>"}`. Activates an existing saved view for all Card box clients.
+- **Leaving a temporary view**, through creation or activation, requires an explicit choice: add `"temporaryAction":"save","saveName":"Unique name"` or `"temporaryAction":"discard"`. Without a choice, or with a stale fromViewId, the operation returns 409 and changes nothing. Ask the human before discarding/replacing their temporary work; never automatically retry a 409 with discard. Validate/re-read current view after a conflict.
+- `POST /api/card-box/views/:id/save`: `{"name":"Unique name"}` makes that temporary view saved. Saved views subsequently autosave membership, layout and viewport changes.
+- `PATCH /api/card-box/views/:id`: `{"name":"New name"}` renames it. Names ≤120 characters; saved names must be non-empty. Names are unique under Unicode normalization/case folding. Only the active view may be temporary; it survives refresh and normal backend restart when Canvas persistence is enabled, but is not a saved dropdown entry until Save.
+- `POST /api/card-box/views/:id/cards/:cardId` with `{}`: idempotently adds an existing card.
+- `DELETE /api/card-box/views/:id/cards/:cardId` with `{}`: removes only that membership/placement, **not** the library card or other views. This is what “remove from this view” means. Do not substitute permanent card deletion.
+- `DELETE /api/card-box/views/:id`: `{"confirm":true,"fromViewId":"<CURRENT_VIEW_ID>"}`. Requires human confirmation. fromViewId is required when deleting the active view. Deletes only the view; cards, attachments and agent remain. Deleting the active view opens another saved view, or creates an empty temporary one if none remain.
+- **Human layout only**: `PATCH /api/card-box/views/:id/cards/:cardId` with `x,y,width,height` (minimum 240); `PATCH /api/card-box/views/:id/viewport` with `{x,y,zoom}` (zoom 0.2–2). **Agents must not modify positions, sizes or viewport coordinates.** The same card's placements are independent between views.
+
+On an upgrade, existing Card box placements migrate to a saved **原有 Card box** view without rearranging cards or changing the agent. Views and temporary work use Canvas JSON schema 3; card contents remain in SQLite schema 4. Missing cards are pruned, never recreated. Save errors remain visible through persistence.error; ordinary card-editor drafts are separate and still not persisted across page reload.
+
+For a request like “create a view about cryptography,” read current view metadata, search/read library cards, choose appropriate existing IDs, then create a named temporary view. It opens immediately in Card box. For “add/remove DH here,” read activeViewId, identify the card, and use the membership endpoints for that ID. Preserve other views and never send an initial task or recreate the shared agent.
 
 ## Delegate work to a new Pi agent
 

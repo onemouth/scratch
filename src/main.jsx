@@ -13,8 +13,10 @@ import { pasteChunks } from './terminal-paste.js';
 import { correctTerminalMouseScale } from './terminal-mouse-scale.js';
 import { completedAgents } from './agent-notifications.js';
 import { includeCreatedAgent } from './agent-state.js';
-import { CardNode } from './cards.jsx';
+import { CardNode, reconcileCardDrafts } from './cards.jsx';
 import { AgentName } from './agent-name.jsx';
+import { CardLibrary, ViewControls } from './card-views.jsx';
+import { mergeViewResponse, mergeViewSnapshot, nodeMeasurement as measuredLike } from './card-view-state.js';
 
 async function api(path, method = 'GET', body) {
   const response = await fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
@@ -29,7 +31,7 @@ function PtyTerminal({ id, stopped, focusRequest }) {
   const container = React.useRef(null);
   const termRef = React.useRef(null);
   useEffect(() => {
-    const terminal = new Terminal({ cursorBlink: true, fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 11, lineHeight: 1.25, theme: { background: '#101927', foreground: '#d1dcec', cursor: '#a5a7fa' }, scrollback: 3000, allowProposedApi: false });
+    const terminal = new Terminal({ cursorBlink: true, fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 11, lineHeight: 1.25, scrollSensitivity: 1.5, theme: { background: '#101927', foreground: '#d1dcec', cursor: '#a5a7fa' }, scrollback: 3000, allowProposedApi: false });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(container.current);
@@ -196,7 +198,9 @@ function Canvas() {
   const [mode, setMode] = useState(() => {
     try { return localStorage.getItem('agent-canvas:workspace') === 'card-box' ? 'card-box' : 'agents'; } catch { return 'agents'; }
   });
-  useEffect(() => { cardAudio.reconcile(state.cards || []); }, [state.cards]);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const mergeBox = useCallback(cardBox => setState(current => mergeViewResponse(current, cardBox)), []);
+  useEffect(() => { cardAudio.reconcile(state.cards || []); reconcileCardDrafts(state.cards || []); }, [state.cards]);
   useEffect(() => {
     // Ignore files dropped outside a card without letting the browser navigate.
     const prevent = event => { if (event.dataTransfer?.types?.includes('Files')) event.preventDefault(); };
@@ -208,6 +212,15 @@ function Canvas() {
   const initialized = useNodesInitialized();
   const viewportByMode = React.useRef({});
   const appliedMode = React.useRef(null);
+  const applyingViewport = React.useRef(false);
+  const appliedViewport = React.useRef(null);
+  const viewportSequence = React.useRef(0);
+  const viewportGesture = React.useRef(null);
+  const pendingViewports = React.useRef(new Map());
+  const dragTargets = React.useRef(new Map());
+  const restorePlacement = useCallback((id, p) => {
+    if (p) setNodes(items => items.map(n => n.id !== id ? n : { ...n, dragging: false, position: { x: p.x, y: p.y }, width: p.width, height: p.height, style: { ...n.style, width: p.width, height: p.height } }));
+  }, []);
   useEffect(() => { try { localStorage.setItem('agent-canvas:workspace', mode); } catch {} }, [mode]);
   const [guide, setGuide] = useState('');
   const [docsError, setDocsError] = useState('');
@@ -303,7 +316,7 @@ function Canvas() {
       }
       previousActivity = new Map(next.agents.map(agent => [agent.id, agent.activity]));
       knownAgents = new Set(next.agents.map(agent => agent.id));
-      setState(next);
+      setState(current => mergeViewSnapshot(current, next));
       setMaximizedId(id => id && !next.agents.some(agent => agent.id === id) ? null : id);
       // Initial load/reconnect does not steal focus; live API-created agents do.
       if (added?.length) focusAgent(added.at(-1).id, added.at(-1).workspace);
@@ -316,36 +329,80 @@ function Canvas() {
       return [...state.agents.map(agent => {
         const old = byId.get(agent.id);
         return {
-          id: agent.id, type: 'agent', position: old?.dragging ? old.position : { x: agent.x, y: agent.y },
+          id: agent.id, type: 'agent', measured: measuredLike(old, agent.width, agent.height), dragging: old?.dragging, position: old?.dragging ? old.position : { x: agent.x, y: agent.y },
           style: { width: agent.width, height: agent.height, visibility: ((agent.workspace === 'card-box') === (mode === 'card-box')) ? 'visible' : 'hidden', pointerEvents: ((agent.workspace === 'card-box') === (mode === 'card-box')) ? 'auto' : 'none' }, zIndex: maximizedId === agent.id ? 10000 : undefined,
           data: { agent, cardBox: agent.workspace === 'card-box', workspace: agent.workspace === 'card-box' ? 'card-box' : 'agents', position: old?.dragging ? old.position : { x: agent.x, y: agent.y }, maximized: maximizedId === agent.id, onMaximize: maximizeAgent, maximizeFocus, onFocus: focusAgent, focusRequest: !open && !docsOpen && focusTarget?.id === agent.id ? focusTarget.request : 0 }, selected: old?.selected,
         };
       }), ...(state.notes || []).map(note => {
         const old = byId.get(note.id);
-        return { id: note.id, type: 'note', dragHandle: '.note-drag-handle', position: old?.dragging ? old.position : { x: note.x, y: note.y }, style: { width: note.width, height: note.height, visibility: mode === 'agents' ? 'visible' : 'hidden', pointerEvents: mode === 'agents' ? 'auto' : 'none' }, data: { note, workspace: 'agents' }, selected: old?.selected };
+        return { id: note.id, type: 'note', measured: measuredLike(old, note.width, note.height), dragging: old?.dragging, dragHandle: '.note-drag-handle', position: old?.dragging ? old.position : { x: note.x, y: note.y }, style: { width: note.width, height: note.height, visibility: mode === 'agents' ? 'visible' : 'hidden', pointerEvents: mode === 'agents' ? 'auto' : 'none' }, data: { note, workspace: 'agents' }, selected: old?.selected };
       }), ...(state.cardPlacements || []).flatMap(placement => {
         const card = (state.cards || []).find(card => card.id === placement.cardId);
         if (!card) return [];
         const old = byId.get(placement.id);
-        return [{ id: placement.id, type: 'card', dragHandle: '.card-drag-handle', position: old?.dragging ? old.position : { x: placement.x, y: placement.y }, style: { width: placement.width, height: placement.height, visibility: mode === 'agents' ? 'visible' : 'hidden', pointerEvents: mode === 'agents' ? 'auto' : 'none' }, data: { card, workspace: 'agents' }, selected: old?.selected }];
+        return [{ id: placement.id, type: 'card', measured: measuredLike(old, placement.width, placement.height), dragging: old?.dragging, dragHandle: '.card-drag-handle', position: old?.dragging ? old.position : { x: placement.x, y: placement.y }, style: { width: placement.width, height: placement.height, visibility: mode === 'agents' ? 'visible' : 'hidden', pointerEvents: mode === 'agents' ? 'auto' : 'none' }, data: { card, placement, restorePlacement, workspace: 'agents' }, selected: old?.selected }];
       }), ...(state.cardBox?.placements || []).flatMap(placement => {
         const card = (state.cards || []).find(card => card.id === placement.cardId);
         if (!card) return [];
         const id = `card-box-${placement.id}`, old = byId.get(id);
-        return [{ id, type: 'card', dragHandle: '.card-drag-handle', position: old?.dragging ? old.position : { x: placement.x, y: placement.y }, style: { width: placement.width, height: placement.height, visibility: mode === 'card-box' ? 'visible' : 'hidden', pointerEvents: mode === 'card-box' ? 'auto' : 'none' }, data: { card, cardBox: true, inAgentCanvas: (state.cardPlacements || []).some(item => item.cardId === card.id), workspace: 'card-box' }, selected: old?.selected }];
+        const dragging = old?.dragging && old.data.viewId === state.cardBox.activeViewId;
+        return [{ id, type: 'card', measured: measuredLike(old, placement.width, placement.height), dragging, dragHandle: '.card-drag-handle', position: dragging ? old.position : { x: placement.x, y: placement.y }, style: { width: placement.width, height: placement.height, visibility: mode === 'card-box' ? 'visible' : 'hidden', pointerEvents: mode === 'card-box' ? 'auto' : 'none' }, data: { card, placement, restorePlacement, cardBox: true, viewId: state.cardBox.activeViewId, inAgentCanvas: (state.cardPlacements || []).some(item => item.cardId === card.id), workspace: 'card-box' }, selected: old?.selected }];
       })];
     });
   }, [mode, state.cardBox, state.agents, state.notes, state.cards, state.cardPlacements, focusTarget, open, docsOpen, focusAgent, maximizedId, maximizeAgent, maximizeFocus]);
   useEffect(() => {
-    if (!initialized || appliedMode.current === mode || !nodes.every(node => (node.style.visibility === 'visible') === (node.data.workspace === mode))) return;
-    if (appliedMode.current) viewportByMode.current[appliedMode.current] = getViewport();
-    appliedMode.current = mode;
-    const saved = viewportByMode.current[mode];
-    if (saved) setViewport(saved);
-    // A human launch into an empty workspace is already centered below. Do not
-    // let first-node initialization run fitView and change the current zoom.
-    else if (!focusTarget) fitView({ nodes: nodes.filter(node => node.data.workspace === mode).map(node => ({ id: node.id })), padding: 0.3 });
-  }, [mode, nodes, initialized, focusTarget, fitView, getViewport, setViewport]);
+    const box = state.cardBox;
+    const key = mode === 'card-box' ? 'card-box:' + box?.activeViewId : 'agents';
+    if ((!initialized && nodes.length) || !nodes.every(node => (node.style.visibility === 'visible') === (node.data.workspace === mode)) || nodes.some(n => n.data.cardBox && n.type === 'card' && n.data.viewId !== box?.activeViewId)) return;
+    const active = box?.views?.find(v => v.id === box.activeViewId);
+    const target = mode === 'card-box' ? active?.viewport : viewportByMode.current.agents;
+    const current = getViewport();
+    const same = target && ['x','y','zoom'].every(k => Math.abs(target[k] - current[k]) < 0.001);
+    // Do not snap a local pan/zoom/fit back to an earlier SSE viewport while
+    // that gesture or its acknowledgement is still in progress.
+    if (mode === 'card-box' && appliedMode.current === key && (viewportGesture.current === box?.activeViewId || pendingViewports.current.has(box?.activeViewId))) return;
+    const signature = JSON.stringify(target ?? null);
+    if (appliedMode.current === key && appliedViewport.current === signature) return;
+    if (appliedMode.current === key && same) { appliedViewport.current = signature; return; }
+    if (appliedMode.current === 'agents') viewportByMode.current.agents = current;
+    const switched = appliedMode.current !== key;
+    appliedMode.current = key;
+    appliedViewport.current = signature;
+    const sequence = ++viewportSequence.current;
+    applyingViewport.current = true;
+    let operation;
+    if (target) operation = setViewport(target);
+    else if (!focusTarget && switched && mode === 'card-box' && !active?.saved) operation = setViewport({ x: 0, y: 0, zoom: 1 });
+    else if (!focusTarget && switched) operation = fitView({ nodes: nodes.filter(node => node.data.workspace === mode).map(node => ({ id: node.id })), padding: 0.3 });
+    Promise.resolve(operation).finally(() => { if (sequence === viewportSequence.current) applyingViewport.current = false; });
+  }, [mode, state.cardBox, nodes, initialized, focusTarget, fitView, getViewport, setViewport]);
+  const persistViewport = useCallback(async (id, viewport) => {
+    if (!id) return;
+    pendingViewports.current.set(id, (pendingViewports.current.get(id) || 0) + 1);
+    try { mergeBox(await api('/card-box/views/' + id + '/viewport', 'PATCH', viewport)); }
+    finally {
+      const remaining = pendingViewports.current.get(id) - 1;
+      if (remaining) pendingViewports.current.set(id, remaining); else pendingViewports.current.delete(id);
+    }
+  }, [mergeBox]);
+  const beforeViewSwitch = useCallback(async id => {
+    if (mode === 'card-box' && stateRef.current.cardBox?.activeViewId === id && appliedMode.current === 'card-box:' + id && !applyingViewport.current) await persistViewport(id, getViewport());
+  }, [mode, persistViewport, getViewport]);
+  const onMoveStart = useCallback(() => {
+    if (mode === 'card-box' && !applyingViewport.current) viewportGesture.current = stateRef.current.cardBox?.activeViewId;
+  }, [mode]);
+  const onMoveEnd = useCallback((_, viewport) => {
+    if (mode !== 'card-box' || applyingViewport.current) return;
+    const source = viewportGesture.current; viewportGesture.current = null;
+    const box = stateRef.current.cardBox, view = box?.views?.find(v => v.id === box.activeViewId);
+    if (source && source !== box?.activeViewId) {
+      const sequence = ++viewportSequence.current; applyingViewport.current = true;
+      setViewport(view?.viewport ?? { x: 0, y: 0, zoom: 1 }).finally(() => { if (sequence === viewportSequence.current) applyingViewport.current = false; });
+      return;
+    }
+    if (view?.viewport && ['x','y','zoom'].every(k => Math.abs(view.viewport[k] - viewport[k]) < 0.001)) return;
+    persistViewport(box?.activeViewId, viewport).catch(e => setError(e.message));
+  }, [mode, persistViewport, setViewport]);
   useEffect(() => {
     if (!focusTarget || open || docsOpen || centeredRequest.current === focusTarget.request) return;
     const node = nodes.find(node => node.id === focusTarget.id);
@@ -357,7 +414,13 @@ function Canvas() {
     setCenter(node.position.x + node.style.width / 2, node.position.y + node.style.height / 2, { zoom: getZoom(), duration: 200 });
   }, [nodes, mode, focusTarget, open, docsOpen, setCenter, getZoom]);
   const onNodesChange = useCallback(changes => setNodes(ns => applyNodeChanges(changes, ns)), []);
-  const onNodeDragStop = useCallback((_, node) => { api(node.type === 'card' ? `/${node.data.cardBox ? 'card-box/placements' : 'card-placements'}/${node.data.card.id}` : `/${node.type === 'note' ? 'notes' : 'agents'}/${node.id}`, 'PATCH', { x: node.position.x, y: node.position.y }).catch(console.error); }, []);
+  const onNodeDragStart = useCallback((_, node) => { dragTargets.current.set(node.id, node.data.viewId); }, []);
+  const onNodeDragStop = useCallback((_, node) => {
+    const source = dragTargets.current.get(node.id); dragTargets.current.delete(node.id);
+    if (node.type === 'card' && node.data.cardBox && source !== stateRef.current.cardBox?.activeViewId) { restorePlacement(node.id, stateRef.current.cardBox?.placements.find(p => p.id === node.data.card.id)); return; }
+    const path = node.type === 'card' ? (node.data.cardBox ? (source ? `/card-box/views/${source}/cards/${node.data.card.id}` : `/card-box/placements/${node.data.card.id}`) : `/card-placements/${node.data.card.id}`) : `/${node.type === 'note' ? 'notes' : 'agents'}/${node.id}`;
+    api(path, 'PATCH', { x: node.position.x, y: node.position.y }).catch(e => setError(e.message));
+  }, [restorePlacement]);
   const onConnect = useCallback(async ({ source, target }) => { try { await api('/edges', 'POST', { source, target }); } catch (e) { setError(e.message); } }, []);
   const edges = useMemo(() => mode === 'card-box' ? [] : state.edges.map(edge => ({ ...edge, data: { label: edge.label || 'delegates', onError: setError }, markerEnd: { type: 'arrowclosed', color: '#8aa3e8' } })), [state.edges, mode]);
   const resetCanvas = async () => {
@@ -398,12 +461,15 @@ function Canvas() {
   };
   return <div className={`app${maximizedId ? ' is-maximized' : ''}`}>
     <div className="topbar"><div className="workspace-nav"><div className="brand"><span className="brand-icon">✳</span> {mode === 'card-box' ? 'Card box' : 'Agent Canvas'} <small>PI WORKSPACE</small></div><button type="button" className="guide-button" onClick={switchMode}>{mode === 'agents' ? 'Card box' : 'Agent Canvas'}</button></div><div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button notification-toggle" type="button" aria-label={notificationsEnabled ? 'Disable browser notifications' : 'Enable browser notifications'} title={notificationsEnabled ? 'Browser notifications on · click to turn off' : 'Browser notifications off · click to enable'} aria-pressed={notificationsEnabled} onClick={toggleNotifications}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4" />{!notificationsEnabled && <path d="M3 3l18 18" />}</svg></button>{mode === 'agents' && <button className="guide-button" onClick={resetCanvas}>Reset Canvas</button>}<button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" onClick={createCard}>＋ Card</button>{mode === 'agents' ? <><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></> : !state.agents.some(agent => agent.workspace === 'card-box') && <button className="primary" onClick={launchBoxAgent}>Start Card box agent</button>}</div></div>
-    <ReactFlow proOptions={{ hideAttribution: true }} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={!maximizedId && (pointerMode === 'mouse' ? [2] : true)} panOnScroll={!maximizedId && pointerMode === 'touchpad'} panOnScrollSpeed={1} zoomOnScroll={!maximizedId && pointerMode === 'mouse'} zoomOnPinch={!maximizedId} nodesDraggable={!maximizedId} nodesConnectable={!maximizedId && mode === 'agents'} zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
+    {mode === 'card-box' && <ViewControls box={state.cardBox} libraryOpen={libraryOpen} onLibrary={() => setLibraryOpen(v => !v)} onChange={mergeBox} onError={setError} beforeSwitch={beforeViewSwitch} />}
+    {mode === 'card-box' && libraryOpen && <CardLibrary cards={state.cards || []} box={state.cardBox} onChange={mergeBox} onClose={() => setLibraryOpen(false)} />}
+    <div className={`flow-area${mode === 'card-box' && state.cardBox?.views ? ' box-flow' : ''}${mode === 'card-box' && libraryOpen ? ' with-library' : ''}`}>
+    <ReactFlow onMoveStart={onMoveStart} onMoveEnd={onMoveEnd} proOptions={{ hideAttribution: true }} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={!maximizedId && (pointerMode === 'mouse' ? [2] : true)} panOnScroll={!maximizedId && pointerMode === 'touchpad'} panOnScrollSpeed={1} zoomOnScroll={!maximizedId && pointerMode === 'mouse'} zoomOnPinch={!maximizedId} nodesDraggable={!maximizedId} nodesConnectable={!maximizedId && mode === 'agents'} zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
       <Background color="#243148" gap={24} size={1} />
       <Controls fitViewOptions={{ nodes: nodes.filter(node => node.data.workspace === mode).map(node => ({ id: node.id })), padding: 0.3 }}>
         <ControlButton className="pointer-toggle" aria-label={`Pointer mode: ${pointerMode === 'mouse' ? 'Mouse' : 'Touchpad'}. Click to switch to ${pointerMode === 'mouse' ? 'Touchpad' : 'Mouse'}`} title={pointerMode === 'mouse' ? 'Mouse · Right-drag to pan, wheel to zoom · Click for Touchpad' : 'Touchpad · Two-finger scroll to pan, pinch to zoom · Click for Mouse'} onClick={() => setPointerMode(mode => mode === 'mouse' ? 'touchpad' : 'mouse')}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8">{pointerMode === 'mouse' ? <><rect x="5" y="2" width="14" height="20" rx="7" /><path d="M12 2v7M5 10h14" /></> : <><rect x="2" y="5" width="20" height="14" rx="2" /><path d="M2 15h20" /></>}</svg></ControlButton>
       </Controls><WorkspaceOverview nodes={nodes} workspace={mode} />
-    </ReactFlow>
+    </ReactFlow></div>
     {mode === 'agents' && !state.agents.some(agent => agent.workspace !== 'card-box') && !(state.notes || []).length && !(state.cardPlacements || []).length && <div className="empty"><div className="empty-icon">✳</div><h1>Space for your agents.</h1><p>Start a Pi agent, then connect agents to map real delegation.</p><button type="button" className="primary" onClick={openLaunch}>＋ Create your first agent</button><span>{pointerMode === 'mouse' ? 'Right-drag canvas to pan · Wheel to zoom' : 'Drag or two-finger scroll to pan · Pinch to zoom'}</span></div>}
     {state.persistence?.error && <div className="save-error" role="alert">Canvas is not saved: {state.persistence.error}</div>}
     {error && !open && <div className="toast" onClick={() => setError('')}>{error} ×</div>}
