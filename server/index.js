@@ -364,12 +364,12 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           if (!action && req.method === 'PATCH') {
             if (Object.keys(body).some(k => k !== 'name')) throw new Error('Only view name is editable');
             views.rename(id, body.name);
-          } else if (!action && req.method === 'DELETE') views.remove(id, body);
-          else if (action === 'activate' && req.method === 'POST') views.activate(id, body);
+          } else if (!action && req.method === 'DELETE') views.remove(id, body, cards.list());
+          else if (action === 'activate' && req.method === 'POST') views.activate(id, body, cards.list());
           else if (action === 'save' && req.method === 'POST') views.save(id, body.name);
           else if (action === 'viewport' && req.method === 'PATCH') view.viewport = validateViewport(body);
-          else if (action === 'cards' && memberId && req.method === 'POST') views.add(id, cards.get(memberId));
-          else if (action === 'cards' && memberId && req.method === 'DELETE') view.placements.delete(memberId);
+          else if (action === 'cards' && memberId && req.method === 'POST') views.add(id, cards.get(memberId), cards.list());
+          else if (action === 'cards' && memberId && req.method === 'DELETE') views.removeCard(id, memberId, cards.list());
           else if (action === 'cards' && memberId && req.method === 'PATCH') {
             const placement = view.placements.get(memberId);
             if (!placement) return reply(res, 404, { error: 'View placement not found' });
@@ -390,7 +390,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           if (Object.keys(body).some(key => !['content', 'tags', 'links', 'place'].includes(key))) throw new Error('Allowed fields: content, tags, links, place');
           if (body.place !== undefined && typeof body.place !== 'boolean') throw new Error('place must be boolean');
           const card = cards.create(body);
-          views.add(views.activeViewId, card);
+          views.addNew(card, cards.list());
           if (body.place !== false) cardPlacements.set(card.id, { id: card.id, cardId: card.id, x: 0, y: 0, width: 340, height: 320 });
           broadcast(); return reply(res, 201, card);
         }

@@ -5,9 +5,12 @@ import { validateViewState } from './card-views.js';
 
 export function validateCanvas(value) {
   const fail = () => { throw new Error('Invalid or unsupported Canvas save file'); };
-  if (!value || ![1, 2, 3].includes(value.version)) fail();
+  if (!value || ![1, 2, 3, 4].includes(value.version)) fail();
   if (value.version >= 2 && !Array.isArray(value.cardPlacements)) fail();
-  if (value.version === 3) { try { validateViewState(value.cardBox); } catch { fail(); } }
+  if (value.version >= 3) {
+    try { validateViewState(value.cardBox); } catch { fail(); }
+    if (value.version === 4 && value.cardBox.views.filter(view => view.system === 'unfiled').length !== 1) fail();
+  }
   const ids = new Set();
   for (const kind of ['agents', 'notes', 'edges']) {
     if (!Array.isArray(value[kind])) fail();
@@ -75,7 +78,7 @@ export function loadCanvas(file) {
 
 export function saveCanvas(file, state) {
   if (!file) return;
-  const value = validateCanvas({ ...state, cardPlacements: state.cardPlacements || [], version: state.cardBox?.views ? 3 : 2 });
+  const value = validateCanvas({ ...state, cardPlacements: state.cardPlacements || [], version: state.cardBox?.views ? 4 : 2 });
   mkdirSync(dirname(file), { recursive: true, mode: 0o700 });
   const temporary = `${file}.tmp`;
   const fd = openSync(temporary, 'w', 0o600);

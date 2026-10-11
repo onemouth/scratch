@@ -336,6 +336,7 @@ function Canvas() {
     return () => stream.close();
   }, [focusAgent]);
   useEffect(() => {
+    const systemView = state.cardBox?.views?.find(view => view.id === state.cardBox.activeViewId)?.system;
     setNodes(previous => {
       const byId = new Map(previous.map(n => [n.id, n]));
       return [...state.agents.map(agent => {
@@ -358,7 +359,7 @@ function Canvas() {
         if (!card) return [];
         const id = `card-box-${placement.id}`, old = byId.get(id);
         const dragging = old?.dragging && old.data.viewId === state.cardBox.activeViewId;
-        return [{ id, type: 'card', measured: measuredLike(old, placement.width, placement.height), dragging, dragHandle: '.card-drag-handle', position: dragging ? old.position : { x: placement.x, y: placement.y }, style: { width: placement.width, height: placement.height, visibility: mode === 'card-box' ? 'visible' : 'hidden', pointerEvents: mode === 'card-box' ? 'auto' : 'none' }, data: { card, placement, restorePlacement, cardBox: true, viewId: state.cardBox.activeViewId, onExploreTag: exploreTag, onExploreLink: exploreLink, inAgentCanvas: (state.cardPlacements || []).some(item => item.cardId === card.id), workspace: 'card-box' }, selected: old?.selected }];
+        return [{ id, type: 'card', measured: measuredLike(old, placement.width, placement.height), dragging, dragHandle: '.card-drag-handle', position: dragging ? old.position : { x: placement.x, y: placement.y }, style: { width: placement.width, height: placement.height, visibility: mode === 'card-box' ? 'visible' : 'hidden', pointerEvents: mode === 'card-box' ? 'auto' : 'none' }, data: { card, placement, restorePlacement, cardBox: true, viewId: state.cardBox.activeViewId, systemView, onExploreTag: exploreTag, onExploreLink: exploreLink, inAgentCanvas: (state.cardPlacements || []).some(item => item.cardId === card.id), workspace: 'card-box' }, selected: old?.selected }];
       })];
     });
   }, [mode, state.cardBox, state.agents, state.notes, state.cards, state.cardPlacements, focusTarget, open, docsOpen, focusAgent, exploreTag, exploreLink, maximizedId, maximizeAgent, maximizeFocus]);

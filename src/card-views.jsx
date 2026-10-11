@@ -64,9 +64,9 @@ export function ViewControls({ box, libraryOpen, onLibrary, onChange, onError, b
       </select></label>
       <button type="button" disabled={busy} onClick={() => leave('new')}>＋ New view</button>
       {!active.saved && <button type="button" disabled={busy} onClick={() => open('save')}>Save view</button>}
-      <span className="view-state">{active.placements.length} cards · {active.saved ? 'Autosave' : 'Temporary · recoverable'}</span>
-      <button type="button" disabled={busy} onClick={() => open('rename')}>Rename</button>
-      <button type="button" className="view-danger" disabled={busy} onClick={() => open('delete')}>Delete view…</button>
+      <span className="view-state">{active.placements.length} cards · {active.system === 'unfiled' ? 'Dynamic' : active.saved ? 'Autosave' : 'Temporary · recoverable'}</span>
+      {!active.system && <button type="button" disabled={busy} onClick={() => open('rename')}>Rename</button>}
+      {!active.system && <button type="button" className="view-danger" disabled={busy} onClick={() => open('delete')}>Delete view…</button>}
     </nav>
     {dialog && <Dialog title={dialog.type === 'leave' ? 'Leave temporary view?' : dialog.type === 'delete' ? 'Delete view?' : dialog.type === 'save' ? 'Save view' : 'Rename view'} onClose={() => { if (!busy) setDialog(null); }}>
       <form onSubmit={e => {
@@ -105,6 +105,7 @@ export function CardLibrary({ cards, box, onChange, onClose }) {
     return () => { clearTimeout(timer); controller.abort(); };
   }, [query, offset, revision]);
   const members = new Set((box?.placements || []).map(p => p.cardId));
+  const systemView = box?.views?.find(view => view.id === box.activeViewId)?.system;
   const toggle = async card => {
     setBusy(card.id); setError('');
     try { onChange(await request(`/card-box/views/${box.activeViewId}/cards/${card.id}`, members.has(card.id) ? 'DELETE' : 'POST', {})); }
@@ -121,7 +122,7 @@ export function CardLibrary({ cards, box, onChange, onClose }) {
       {error && <p className="node-error" role="alert">{error}</p>}
       <div className="library-grid">{shown.map(card => <article className="library-card" key={card.id}>
         <button type="button" className="library-preview" aria-label={`Preview card ${card.id}`} onClick={() => setPreview(card.id)}>{card.image && <img className="library-thumbnail" src={card.image.url} alt={card.image.name} loading="lazy" />}{card.audio && <span className="library-audio">♫ {card.audio.name}</span>}<div className="card-markdown"><CardMarkdown content={card.content} preview /></div></button>
-        <footer><span>{card.id}</span><button type="button" disabled={!!busy || !box?.activeViewId} aria-label={`${members.has(card.id) ? 'Remove' : 'Add'} card ${card.id} ${members.has(card.id) ? 'from' : 'to'} current view`} onClick={() => toggle(card)}>{busy === card.id ? '…' : members.has(card.id) ? '✓ Remove' : '＋ Add'}</button></footer>
+        <footer><span>{card.id}</span>{systemView === 'unfiled' ? <span className="library-membership">Unfiled</span> : <button type="button" disabled={!!busy || !box?.activeViewId} aria-label={`${members.has(card.id) ? 'Remove' : 'Add'} card ${card.id} ${members.has(card.id) ? 'from' : 'to'} current view`} onClick={() => toggle(card)}>{busy === card.id ? '…' : members.has(card.id) ? '✓ Remove' : '＋ Add'}</button>}</footer>
         {card.tags.length > 0 && <div className="library-tags">{card.tags.join(' · ')}</div>}
       </article>)}</div>
       {!loading && !shown.length && <p>No matching cards.</p>}

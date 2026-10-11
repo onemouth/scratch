@@ -200,6 +200,7 @@ button.card-meta-link:hover, button.card-meta-link:focus-visible { background: #
 .library-card footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 6px; border-top: 1px solid #bec8df; padding: 6px; font-size: 10px; }
 .library-card footer button { font-size: 10px; padding: 4px 6px; color: #35477b; background: #f3f5fc; border: 1px solid #b6c2df; border-radius: 5px; }
 .library-card footer button:hover { background: #d5def7; }
+.library-membership { padding: 3px 6px; color: #66728c; border: 1px solid #bdc7dc; border-radius: 999px; }
 .library-tags { padding: 0 6px 6px; font-size: 10px; overflow-wrap: anywhere; }
 .library-pagination, .view-dialog-actions { display: flex; align-items: center; justify-content: space-between; gap: 8px; margin-top: 14px; }
 .view-dialog-actions { justify-content: flex-end; flex-wrap: wrap; }

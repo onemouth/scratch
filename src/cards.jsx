@@ -111,7 +111,7 @@ export function CardNode({ id, data, selected }) {
       request(placementPath, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message));
     }} />
     <section className="zettel-card">
-      <CardFace card={data.card} onRemove={data.cardBox && !data.viewId ? undefined : remove} onAdd={data.cardBox && !data.inAgentCanvas ? add : undefined} adding={adding} onDelete={destroy} onTagClick={data.cardBox && data.viewId ? tag => data.onExploreTag(tag) : undefined} onLinkClick={data.cardBox && data.viewId ? linkedId => data.onExploreLink(data.card.id, linkedId) : undefined} fontSize={fontSize} draftScope={data.cardBox ? 'card-box' : 'agents'} removeFromView={!!data.cardBox} draggable />
+      <CardFace card={data.card} onRemove={data.cardBox && (!data.viewId || data.systemView) ? undefined : remove} onAdd={data.cardBox && !data.inAgentCanvas ? add : undefined} adding={adding} onDelete={destroy} onTagClick={data.cardBox && data.viewId ? tag => data.onExploreTag(tag) : undefined} onLinkClick={data.cardBox && data.viewId ? linkedId => data.onExploreLink(data.card.id, linkedId) : undefined} fontSize={fontSize} draftScope={data.cardBox ? 'card-box' : 'agents'} removeFromView={!!data.cardBox} draggable />
       {error && <div className="node-error" role="alert">{error}</div>}
     </section>
   </>;

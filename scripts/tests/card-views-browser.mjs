@@ -257,6 +257,22 @@ try {
  await delay(350);
  assert.ok(app.snapshot().cardBox.views.find(v=>v.id===active()).viewport);
  console.log('Exact tag and recursive linked-card temporary views passed');
+ // The fixed Unfiled view dynamically receives cards with no other membership.
+ const orphan=await api('/cards','POST',{content:'Unfiled fixture',place:false});
+ await api('/card-box/views/'+active()+'/cards/'+orphan.id,'DELETE',{});
+ const unfiled=app.snapshot().cardBox.views.find(view=>view.system==='unfiled');
+ assert.ok(unfiled.placements.some(placement=>placement.id===orphan.id));
+ await select(unfiled.id);await wait('!!document.querySelector(".view-dialog")');
+ await click('.view-dialog button','Discard and switch');
+ await wait('document.querySelector("[aria-label=\\"Current view\\"]").value==='+JSON.stringify(unfiled.id));
+ assert.equal(await ev('Array.from(document.querySelectorAll(".viewbar button")).some(button=>button.textContent==="Rename"||button.textContent.includes("Delete view"))'),false);
+ assert.equal(await ev('!!document.querySelector(".react-flow__node-card[data-id=\\"card-box-'+orphan.id+'\\"] [aria-label=\\"Remove card from current view\\"]")'),false);
+ await click('.viewbar button','Library');await fill('[aria-label="Search cards"]','Unfiled fixture');
+ await wait('document.querySelector(".library-card footer")?.textContent.includes("Unfiled")');
+ const createdUnfiled=await api('/cards','POST',{content:'Created while Unfiled is active',place:false});
+ await wait('!!document.querySelector(".react-flow__node-card[data-id=\\"card-box-'+createdUnfiled.id+'\\"]")');
+ assert.ok(app.snapshot().cardBox.views.find(view=>view.id===unfiled.id).placements.some(placement=>placement.id===createdUnfiled.id));
+ console.log('Dynamic fixed Unfiled view and current-view card creation passed');
  if(process.env.CANVAS_SCREENSHOT)await writeFile(process.env.CANVAS_SCREENSHOT,Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));
  }
 }finally{
