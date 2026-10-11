@@ -1,7 +1,8 @@
 import { unified } from 'unified';
 import remarkParse from 'remark-parse';
+import remarkMath from 'remark-math';
 
-const parser = unified().use(remarkParse);
+const parser = unified().use(remarkParse).use(remarkMath);
 const words = new Intl.Segmenter('en', { granularity: 'word' });
 const graphemes = new Intl.Segmenter('en', { granularity: 'grapheme' });
 const cjk = /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u;
@@ -14,7 +15,11 @@ export function inspectCardContent(content) {
   let rendered = '';
   function visit(node) {
     if (['html', 'image', 'imageReference'].includes(node.type)) throw new Error('Cards support text Markdown only; images and raw HTML are not allowed');
-    if (['text', 'code', 'inlineCode'].includes(node.type)) {
+    if (['math', 'inlineMath'].includes(node.type) || (node.type === 'code' && node.lang === 'math')) {
+      // Count math's literal text/variables/numbers, not TeX command names.
+      // Keep argument text (including \text{...}) in the same 400-unit budget.
+      rendered += ' ' + node.value.replace(/\\[a-zA-Z]+/g, ' ') + ' ';
+    } else if (['text', 'code', 'inlineCode'].includes(node.type)) {
       rendered += node.value;
     }
     for (const child of node.children || []) visit(child);

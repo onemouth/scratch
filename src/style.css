@@ -142,6 +142,10 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .card-markdown h6 { font-size: .67em; }
 .card-markdown code, .card-markdown pre { font-size: 1em; }
 .card-markdown pre { overflow: auto; background: #d4dcef; padding: 8px; }
+.card-markdown .katex { font-size: 1.15em; }
+.card-markdown .katex-display { overflow-x: auto; overflow-y: hidden; padding: .25em 0; }
+.card-markdown .katex-display > .katex { text-align: left; }
+.card-markdown .katex-error { white-space: pre-wrap; overflow-wrap: anywhere; }
 .card-markdown a { color: #245b9c; cursor: pointer; }
 .card-markdown p:first-child { margin-top: 10px; }
 .card-meta dt { font-weight: 600; font-size: inherit; margin-top: 12px; }

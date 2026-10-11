@@ -1,8 +1,9 @@
-import React, { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import React, { useEffect, useMemo, useRef, useState, useSyncExternalStore } from 'react';
 import { cardTypography, viewportWidth, subscribeViewportWidth } from './card-typography.js';
 import { CardAudio, CardImage, CardAttachmentInfo, useCardUpload } from './card-media.jsx';
 import { createCardAutosaver } from './card-autosave.js';
-import Markdown from 'react-markdown';
+import { CardMarkdown } from './card-markdown.js';
+import 'katex/dist/katex.min.css';
 import { NodeResizer, useViewport } from '@xyflow/react';
 import { CARD_LIMIT, inspectCardContent } from '../shared/card-content.js';
 
@@ -43,8 +44,10 @@ export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = fal
     }
   }, [card.content, card.tags.join(', '), (card.links || []).join(', ')]);
   useEffect(() => { autosaver.current?.update(content, tags, links); }, [content, tags, links]);
-  let units = 0, invalid = '';
-  try { units = inspectCardContent(content); } catch (e) { invalid = e.message; }
+  const { units, invalid } = useMemo(() => {
+    try { return { units: inspectCardContent(content), invalid: '' }; }
+    catch (e) { return { units: 0, invalid: e.message }; }
+  }, [content]);
   return <div className={`card-face nowheel nopan${media.dropping ? ' media-drop-target' : ''}`} {...(readOnly ? {} : media.dropProps)}>
     <header className={onRemove || draggable ? 'card-toolbar card-drag-handle' : 'card-toolbar'} aria-label={onRemove || draggable ? 'Drag to move card' : 'Card controls'}>
       <button type="button" className="card-icon nodrag" title={back ? 'View content' : 'View metadata'} aria-label={back ? 'View card content' : 'View card metadata'} aria-pressed={back} onClick={() => setBack(value => !value)}><CardIcon type="flip" /></button>
@@ -55,9 +58,9 @@ export function CardFace({ card, readOnly = false, onRemove, onAdd, adding = fal
     <div className="card-body nodrag" style={fontSize === undefined ? undefined : { fontSize }}>
       {back ? <div className="card-meta"><dl><dt>ID</dt><dd>{card.id}</dd><dt>Tags</dt><dd>{editing ? <input aria-label="Card tags" placeholder="tag, tag" value={tags} onChange={e => setTags(e.target.value)} /> : tags.trim() ? [...new Set(tags.split(',').map(tag => tag.trim()).filter(Boolean))].map(tag => <span className="card-tag" key={tag}>{tag}</span>) : '—'}</dd><dt title="Links are bidirectional: adding or removing one updates both cards.">Links ↔</dt><dd>{editing ? <input aria-label="Card links" placeholder="2026-10-03-0001, 2026-10-03-0002" value={links} onChange={e => setLinks(e.target.value)} /> : links.trim() ? [...new Set(links.split(/[,\s]+/).filter(Boolean))].map(id => <span className="card-tag" key={id}>{id}</span>) : '—'}</dd><CardAttachmentInfo card={card} onRemove={media.remove} busy={media.status.busy || readOnly} /></dl></div>
         : <><div className="card-attachments">{card.audio && <CardAudio file={card.audio} />}{card.image && <CardImage key={card.image.id} file={card.image} />}</div>{editing ? <textarea aria-label="Card Markdown" maxLength={20000} value={content} onChange={e => setContent(e.target.value)} placeholder="One idea, in Markdown…" />
-          : <div className="card-markdown"><Markdown skipHtml disallowedElements={['img']}>{content || '*Empty card*'}</Markdown></div>}</>}
+          : <div className="card-markdown"><CardMarkdown content={content} /></div>}</>}
     </div>
-    <div className={units > CARD_LIMIT || invalid ? 'card-count invalid nodrag' : 'card-count nodrag'} title="CJK characters + English words. Markdown syntax, whitespace and punctuation do not count.">{invalid || `Text units: ${units} / ${CARD_LIMIT}`}</div>
+    <div className={units > CARD_LIMIT || invalid ? 'card-count invalid nodrag' : 'card-count nodrag'} title="CJK characters + words. Math text, variables and numbers count; LaTeX command names, delimiters and punctuation do not.">{invalid || `Text units: ${units} / ${CARD_LIMIT}`}</div>
     {media.dropping && <div className="card-drop-hint">Drop image or audio here</div>}
     {media.status.busy && <div className="card-count" role="status">{media.status.message}</div>}
     {media.status.error && <div className="card-media-error" role="alert">{media.status.error}</div>}

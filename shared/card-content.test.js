@@ -10,6 +10,21 @@ test('counts CJK characters and English words, not Markdown formatting', () => {
   assert.equal(inspectCardContent('か\u3099'), 1);
   assert.equal(inspectCardContent('> hello\n\n- world\n\n`some code`'), 4);
 });
+test('math counts argument text, variables and numbers, excluding command names', () => {
+  assert.equal(inspectCardContent('$\\frac{a}{b}$'), 2);
+  assert.equal(inspectCardContent('$$\n\\frac{a}{b}\n$$'), 2);
+  assert.equal(inspectCardContent('```math\n\\frac{a}{b}\n```'), 2);
+  assert.equal(inspectCardContent('$\\text{中文 hello} + x + 2$'), 5);
+  assert.equal(inspectCardContent('word$x$word'), 3);
+  assert.equal(inspectCardContent('`\\frac{a}{b}`'), 3);
+  assert.equal(inspectCardContent('```latex\n\\frac{a}{b}\n```'), 3);
+  assert.equal(inspectCardContent('Prices: \\$5 and \\$10'), 4);
+  assert.equal(inspectCardContent('$\\unknown{x}$'), 1);
+  assert.equal(validateCardContent('$\\text{' + '中'.repeat(400) + '}$'), 400);
+  assert.throws(() => validateCardContent('$\\text{' + '中'.repeat(401) + '}$'), /400/);
+  assert.throws(() => validateCardContent('$\\text{' + 'word '.repeat(401) + '}$'), /400/);
+});
+
 test('400-unit boundaries and text-only Markdown', () => {
   assert.equal(validateCardContent('中'.repeat(400)), 400);
   assert.equal(validateCardContent('word '.repeat(400)), 400);
