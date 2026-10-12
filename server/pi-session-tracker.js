@@ -1,5 +1,21 @@
 // Loaded explicitly by Canvas-launched Pi processes. Reports session identity
 // and turn state; never sends a prompt or resumes interrupted work.
+export function assistantPreview(message, limit = 120) {
+  if (message?.role !== 'assistant' || !Array.isArray(message.content)) return '';
+  const plain = message.content
+    .filter(part => part?.type === 'text' && typeof part.text === 'string')
+    .map(part => part.text)
+    .join(' ')
+    .replace(/!\[([^\]]*)\]\([^)]*\)/g, '$1')
+    .replace(/\[([^\]]+)\]\([^)]*\)/g, '$1')
+    .replace(/^[\s#>*+-]+/gm, '')
+    .replace(/[`*_~]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+  const characters = Array.from(plain);
+  return characters.length <= limit ? plain : `${characters.slice(0, limit - 1).join('').trimEnd()}…`;
+}
+
 export default function sessionTracker(pi) {
   const base = process.env.AGENT_CANVAS_URL;
   const id = process.env.AGENT_CANVAS_ID;
@@ -8,18 +24,23 @@ export default function sessionTracker(pi) {
   let active = false;
   let ready = false;
   let sequence = 0;
-  const report = (state) => {
+  let preview = '';
+  const report = (state, summary) => {
     if (!ready) return;
     const seq = ++sequence;
     void fetch(`${base}/api/agents/${id}/activity`, {
       method: 'POST', headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ runToken, state, seq }), signal: AbortSignal.timeout(2000),
+      body: JSON.stringify({ runToken, state, seq, ...(summary ? { summary } : {}) }), signal: AbortSignal.timeout(2000),
     }).catch(() => { /* Notifications must never block Pi. */ });
   };
-  pi.on('agent_start', () => { active = true; report('working'); });
+  pi.on('agent_start', () => { active = true; preview = ''; report('working'); });
+  pi.on('message_end', event => {
+    const next = assistantPreview(event.message);
+    if (next) preview = next;
+  });
   pi.on('agent_settled', (_event, ctx) => {
     if (ctx.isIdle() !== true) return;
-    active = false; report('idle');
+    active = false; report('idle', preview);
   });
   pi.on('session_start', async (_event, ctx) => {
     if (ctx.mode !== 'tui') return;

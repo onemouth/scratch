@@ -95,8 +95,10 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.equal((await request(activityPath, 'POST', { runToken, state: 'working', seq: 1 })).status, 200);
     assert.equal((await request(activityPath, 'POST', { runToken, state: 'idle', seq: 0 })).status, 200);
     assert.equal(app.snapshot().agents.find(agent => agent.id === first.id).activity, 'working');
-    assert.equal((await request(activityPath, 'POST', { runToken, state: 'idle', seq: 2 })).status, 200);
+    assert.equal((await request(activityPath, 'POST', { runToken, state: 'idle', seq: 2, summary: 'Implemented the requested change.' })).status, 200);
     assert.equal(app.snapshot().agents.find(agent => agent.id === first.id).activity, 'idle');
+    assert.equal(app.snapshot().agents.find(agent => agent.id === first.id).notificationSummary, 'Implemented the requested change.');
+    assert.equal((await request(activityPath, 'POST', { runToken, state: 'working', seq: 3, summary: 'not allowed' })).status, 400);
     assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), mode: 'unknown' })).status, 400);
     assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), task: '  ' })).status, 400);
     const blank = (await request('/api/agents', 'POST', { name: 'Blank session', workdir: process.cwd() })).data;

@@ -83,7 +83,11 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   let saveError = '';
   const runs = new Map();
   const activity = new Map();
-  const snapshot = (live = true) => ({ agents: [...agents.values()].map(agent => live ? { ...agent, activity: activity.get(agent.id)?.state ?? 'unknown' } : agent), edges: [...edges.values()], notes: [...notes.values()], cardPlacements: [...cardPlacements.values()], cardBox: views?.snapshot({ live }) ?? { placements: [] }, ...(live ? { cards: cards?.list() ?? [] } : {}), persistence: { enabled: !!stateFile, error: saveError } });
+  const snapshot = (live = true) => ({ agents: [...agents.values()].map(agent => {
+    if (!live) return agent;
+    const current = activity.get(agent.id);
+    return { ...agent, activity: current?.state ?? 'unknown', ...(current?.summary ? { notificationSummary: current.summary } : {}) };
+  }), edges: [...edges.values()], notes: [...notes.values()], cardPlacements: [...cardPlacements.values()], cardBox: views?.snapshot({ live }) ?? { placements: [] }, ...(live ? { cards: cards?.list() ?? [] } : {}), persistence: { enabled: !!stateFile, error: saveError } });
   const flush = () => {
     clearTimeout(saveTimer);
     saveTimer = undefined;
@@ -447,9 +451,10 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           const run = runs.get(agent.id);
           if (!run || body.runToken !== run.token) return reply(res, 409, { error: 'Stale Pi process' });
           if (!['working', 'idle'].includes(body.state) || !Number.isSafeInteger(body.seq) || body.seq < 0) throw new Error('Invalid activity report');
+          if (body.summary !== undefined && (body.state !== 'idle' || !validText(body.summary, 240))) throw new Error('Invalid activity summary');
           const previous = activity.get(agent.id);
           if (!previous || body.seq > previous.seq) {
-            activity.set(agent.id, { state: body.state, seq: body.seq });
+            activity.set(agent.id, { state: body.state, seq: body.seq, ...(body.summary ? { summary: body.summary.trim() } : {}) });
             // Activity is ephemeral: no disk write or saved completion replay.
             publishImmediate(); // Do not coalesce a very fast working → idle turn.
           }

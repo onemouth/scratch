@@ -11,7 +11,7 @@ import '@xterm/xterm/css/xterm.css';
 import './style.css';
 import { pasteChunks } from './terminal-paste.js';
 import { correctTerminalMouseScale } from './terminal-mouse-scale.js';
-import { completedAgents } from './agent-notifications.js';
+import { completedAgents, notificationContent } from './agent-notifications.js';
 import { includeCreatedAgent } from './agent-state.js';
 import { CardNode, reconcileCardDrafts } from './cards.jsx';
 import { AgentName } from './agent-name.jsx';
@@ -314,7 +314,8 @@ function Canvas() {
           const activeNode = document.activeElement?.closest?.('.react-flow__node-agent');
           if (document.hasFocus() && activeNode?.getAttribute('data-id') === agent.id) continue;
           try {
-            const notification = new Notification('Agent finished · Agent Canvas', { body: agent.name, tag: `agent-canvas:${agent.id}` });
+            const content = notificationContent(agent);
+            const notification = new Notification(content.title, { body: content.body, tag: `agent-canvas:${agent.id}` });
             notification.onclick = () => {
               window.focus();
               // Keep maximized mode when navigating from a notification.
