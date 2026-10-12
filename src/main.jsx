@@ -32,7 +32,7 @@ function PtyTerminal({ id, stopped, focusRequest }) {
   const container = React.useRef(null);
   const termRef = React.useRef(null);
   useEffect(() => {
-    const terminal = new Terminal({ cursorBlink: true, fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 11, lineHeight: 1.25, scrollSensitivity: 1.5, theme: { background: '#101927', foreground: '#d1dcec', cursor: '#a5a7fa' }, scrollback: 3000, allowProposedApi: false });
+    const terminal = new Terminal({ cursorBlink: true, fontFamily: 'JetBrains Mono, ui-monospace, monospace', fontSize: 11, lineHeight: 1.25, theme: { background: '#101927', foreground: '#d1dcec', cursor: '#a5a7fa' }, scrollback: 3000, allowProposedApi: false });
     const fit = new FitAddon();
     terminal.loadAddon(fit);
     terminal.open(container.current);
