@@ -201,7 +201,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The local canvas API is at ${base}/api. When working with Canvas agents, delegation, messages, progress notes, or card-box cards, read and follow the agent-canvas skill. The skill points to the current API guide. Relationships represent real delegation, not automatic messaging. Never modify canvas coordinates.${agent.workspace === 'card-box' ? ' You are the single Card box agent. Use the Canvas API for card operations when asked; never directly edit SQLite, Canvas JSON, backup or lock files in your workdir.' : ''}`;
     let child;
     try {
-      const common = ['--extension', join(root, 'server', 'pi-session-tracker.js'), '--skill', join(root, 'skills', 'agent-canvas', 'SKILL.md'), '--append-system-prompt', instructions];
+      const common = ['--tui-mode', 'regular', '--extension', join(root, 'server', 'pi-session-tracker.js'), '--skill', join(root, 'skills', 'agent-canvas', 'SKILL.md'), '--append-system-prompt', instructions];
       const args = restoring
         ? [...(exactSession ? ['--session', agent.sessionFile] : ['--resume']), ...common]
         : mode === 'resume' ? ['--resume', ...common]

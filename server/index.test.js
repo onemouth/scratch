@@ -81,6 +81,7 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
       assert.ok(index >= 0);
       assert.equal(child.args[index + 1], fileURLToPath(new URL('../skills/agent-canvas/SKILL.md', import.meta.url)));
       assert.ok(child.args.includes('--extension'));
+      assert.equal(child.args[child.args.indexOf('--tui-mode') + 1], 'regular');
       assert.match(child.args[child.args.indexOf('--append-system-prompt') + 1], /agent-canvas skill/);
     };
     assertCanvasSkill(fakeSpawn.children[0]);
