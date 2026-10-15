@@ -107,7 +107,7 @@ test('SQLite schema 3 migration preserves card contents, links, IDs and sequence
     const a = store.create({ content: 'Original', tags: ['tag'] }), b = store.create({ links: [a.id] });
     store.db.exec('DROP TABLE card_media; DROP TABLE card_files; PRAGMA user_version=3;');
     store.close(); store = new CardStore(file, () => new Date(2026, 9, 3));
-    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 4);
+    assert.equal(store.db.prepare('PRAGMA user_version').get().user_version, 5);
     assert.equal(store.get(a.id).content, 'Original');
     assert.deepEqual(store.get(a.id).tags, ['tag']); assert.deepEqual(store.get(a.id).links, [b.id]);
     assert.equal(store.get(a.id).image, null); assert.equal(store.get(a.id).audio, null);

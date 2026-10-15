@@ -117,11 +117,11 @@ export function CardLibrary({ cards, box, onChange, onClose }) {
   return <>
     <aside className="card-library" aria-label="Card library">
       <header><h2>Card library</h2><button type="button" aria-label="Close library" onClick={onClose}>×</button></header>
-      <input type="search" aria-label="Search cards" placeholder="Search content, tags or ID…" value={query} maxLength={1000} onChange={e => { setQuery(e.target.value); setOffset(0); }} />
+      <input type="search" aria-label="Search cards" placeholder="Search title, content, tags or ID…" value={query} maxLength={1000} onChange={e => { setQuery(e.target.value); setOffset(0); }} />
       <p role="status">{loading ? 'Searching…' : `${result.total} cards`} · matches any search word</p>
       {error && <p className="node-error" role="alert">{error}</p>}
       <div className="library-grid">{shown.map(card => <article className="library-card" key={card.id}>
-        <button type="button" className="library-preview" aria-label={`Preview card ${card.id}`} onClick={() => setPreview(card.id)}>{card.image && <img className="library-thumbnail" src={card.image.url} alt={card.image.name} loading="lazy" />}{card.audio && <span className="library-audio">♫ {card.audio.name}</span>}<div className="card-markdown"><CardMarkdown content={card.content} preview /></div></button>
+        <button type="button" className="library-preview" aria-label={`Preview card ${card.id}`} onClick={() => setPreview(card.id)}>{card.type === 'interactive' ? <div className="library-interactive"><span aria-hidden="true">◇</span><strong>{card.title}</strong><small>Interactive card</small></div> : <>{card.image && <img className="library-thumbnail" src={card.image.url} alt={card.image.name} loading="lazy" />}{card.audio && <span className="library-audio">♫ {card.audio.name}</span>}<div className="card-markdown"><CardMarkdown content={card.content} preview /></div></>}</button>
         <footer><span>{card.id}</span>{systemView === 'unfiled' ? <span className="library-membership">Unfiled</span> : <button type="button" disabled={!!busy || !box?.activeViewId} aria-label={`${members.has(card.id) ? 'Remove' : 'Add'} card ${card.id} ${members.has(card.id) ? 'from' : 'to'} current view`} onClick={() => toggle(card)}>{busy === card.id ? '…' : members.has(card.id) ? '✓ Remove' : '＋ Add'}</button>}</footer>
         {card.tags.length > 0 && <div className="library-tags">{card.tags.join(' · ')}</div>}
       </article>)}</div>

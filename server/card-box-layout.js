@@ -6,8 +6,11 @@ export function syncCardBoxPlacements(placements, cards) {
   for (const card of cards) {
     if (placements.has(card.id)) continue;
     let placement;
+    const interactive = card.type === 'interactive';
     do {
-      placement = { id: card.id, cardId: card.id, x: 540 + (slot % 4) * 380, y: 80 + Math.floor(slot / 4) * 360, width: 340, height: 320 };
+      placement = interactive
+        ? { id: card.id, cardId: card.id, x: 540 + (slot % 3) * 600, y: 80 + Math.floor(slot / 3) * 480, width: 560, height: 420 }
+        : { id: card.id, cardId: card.id, x: 540 + (slot % 4) * 380, y: 80 + Math.floor(slot / 4) * 360, width: 340, height: 320 };
       slot++;
     } while ([...placements.values()].some(p => placement.x < p.x + p.width + 20 && placement.x + placement.width + 20 > p.x && placement.y < p.y + p.height + 20 && placement.y + placement.height + 20 > p.y));
     placements.set(card.id, placement);

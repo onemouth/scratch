@@ -19,6 +19,9 @@ test('all cards get append-only layouts, including library-only cards', () => {
   assert.ok(!(c.x < original.x + original.width && c.x + c.width > original.x && c.y < original.y + original.height && c.y + c.height > original.y));
   syncCardBoxPlacements(placements, [{ id: 'b' }, { id: 'c' }]);
   assert.equal(placements.has('a'), false);
+  syncCardBoxPlacements(placements, [{ id: 'b' }, { id: 'c' }, { id: 'interactive', type: 'interactive' }]);
+  assert.equal(placements.get('interactive').width, 560);
+  assert.equal(placements.get('interactive').height, 420);
 });
 
 test('Card box singleton, separate layouts, reset isolation and exact-session resume', async () => {

@@ -108,6 +108,7 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
 .modal-actions button:not(.primary) { color: #bbc8df; border: 0; background: none; padding: 10px; }
 .zettel-card { height: 100%; display: flex; flex-direction: column; background: #e5e8fa; color: #202a40; border: 1px solid #adb8d2; border-radius: 8px; overflow: hidden; }
+.zettel-card.maximized { border: 0; border-radius: 0; box-shadow: none; }
 .card-drag-handle { display: flex; justify-content: flex-end; align-items: center; padding: 5px 9px; font-size: 11px; cursor: grab; background: #d2d9ef; }
 .card-drag-handle button, .card-toolbar button { border: 0; background: transparent; color: inherit; border-radius: 4px; }
 .card-toolbar button:hover { background: #bac5e0; }
@@ -133,6 +134,19 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .card-toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 4px; min-height: 26px; padding: 4px 8px; border-bottom: 1px solid #bec8df; font-size: 11px; flex: none; }
 .card-body { flex: 1; min-height: 0; overflow: auto; }
 .card-body textarea { width: 100%; height: 100%; min-height: 120px; padding: 12px; border: 0; outline: none; resize: none; background: #f2f4fc; color: #202a40; font-family: ui-monospace, monospace; font-size: inherit; }
+.interactive-card-face .card-body { overflow: hidden; }
+.interactive-toolbar-title { flex: 1; min-width: 0; margin: 0 6px 0 0; overflow: hidden; color: #202a40; font: 600 13px system-ui, sans-serif; text-align: left; text-overflow: ellipsis; white-space: nowrap; }
+.interactive-content { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: #fff; }
+.interactive-content iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.interactive-placeholder, .interactive-library-message { height: 100%; display: grid; place-items: center; padding: 16px; color: #66728c; text-align: center; }
+.interactive-play { position: absolute; inset: 50% auto auto 50%; translate: -50% -50%; min-width: 82px; padding: 9px 14px; color: white; background: #35477b; border: 1px solid #6579af; border-radius: 999px; box-shadow: 0 4px 14px #17213c55; }
+.interactive-restart { position: absolute; right: 8px; top: 8px; padding: 4px 7px; color: #273651; background: #f5f7fbe6; border: 1px solid #aab7cf; border-radius: 5px; font-size: 10px; }
+.interactive-error { position: absolute; inset: 0; z-index: 2; display: grid; place-content: center; gap: 8px; padding: 18px; color: #8c2634; background: #fff1f2f2; text-align: center; overflow-wrap: anywhere; }
+.interactive-error span { font: 11px ui-monospace, monospace; }
+.interactive-error button { justify-self: center; }
+.library-interactive { flex: 1; display: grid; place-content: center; gap: 6px; padding: 12px; text-align: center; }
+.library-interactive span { font-size: 28px; color: #586c9f; }
+.library-interactive small { color: #66728c; }
 .card-markdown, .card-meta { padding: 0 12px; overflow-wrap: anywhere; line-height: 1.5; -webkit-user-select: text; user-select: text; cursor: text; }
 .card-markdown h1 { font-size: 2em; }
 .card-markdown h2 { font-size: 1.5em; }
