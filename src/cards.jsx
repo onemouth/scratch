@@ -38,13 +38,14 @@ function InteractiveCardFace({ card, readOnly, onRemove, onAdd, adding, onDelete
   const draftKey = draftScope + ':' + card.id;
   const restored = useRef(readOnly ? null : cardDrafts.get(draftKey));
   const [back, setBack] = useState(restored.current?.back ?? false);
+  const [editing, setEditing] = useState(restored.current?.editing ?? false);
   const [title, setTitle] = useState(restored.current?.title ?? card.title);
   const [tags, setTags] = useState(restored.current?.tags ?? card.tags.join(', '));
   const [links, setLinks] = useState(restored.current?.links ?? (card.links || []).join(', '));
   const [status, setStatus] = useState({ state: 'saved', error: '' });
   const autosaver = useRef(null);
   const latest = useRef(null);
-  latest.current = { cardId: card.id, title, tags, links, back, interactiveMetadata: true };
+  latest.current = { cardId: card.id, title, tags, links, back, editing, interactiveMetadata: true };
   useEffect(() => {
     if (readOnly) return;
     const saver = createAutosaver({ initial: { title: card.title, tags: card.tags, links: card.links || [] }, validate: interactiveDraft,
@@ -67,15 +68,17 @@ function InteractiveCardFace({ card, readOnly, onRemove, onAdd, adding, onDelete
   const linkDisplay = [...new Set(links.split(/[,\s]+/).filter(Boolean))];
   return <div className="card-face interactive-card-face nowheel nopan">
     <header className={onRemove || draggable ? 'card-toolbar card-drag-handle' : 'card-toolbar'} aria-label={onRemove || draggable ? 'Drag to move card' : 'Card controls'}>
+      <h3 className="interactive-toolbar-title" title={title}>{title}</h3>
       <button type="button" className="card-icon nodrag" title={back ? 'View content' : 'View metadata'} aria-label={back ? 'View card content' : 'View card metadata'} aria-pressed={back} onClick={() => setBack(value => !value)}><CardIcon type="flip" /></button>
+      {!readOnly && back && <button type="button" className="card-icon nodrag" title={editing ? 'Done editing' : 'Edit card'} aria-label={editing ? 'Done editing card' : 'Edit card'} aria-pressed={editing} onClick={() => setEditing(value => !value)}><CardIcon type={editing ? 'done' : 'edit'} /></button>}
       {onAdd && <button type="button" className="card-icon nodrag" title="Add to Agent Canvas" aria-label="Add card to Agent Canvas" disabled={adding} onClick={onAdd}><CardIcon type="add" /></button>}
       {onRemove && <button type="button" className="card-icon nodrag" title={removeFromView ? 'Remove from current view (keeps library card)' : 'Remove from Canvas (keeps card)'} aria-label={removeFromView ? 'Remove card from current view' : 'Remove card from Canvas'} onClick={onRemove}><CardIcon type="remove" /></button>}
     </header>
-    <div className="interactive-title nodrag">{readOnly ? <h3>{title}</h3> : <input aria-label="Interactive card title" maxLength={120} value={title} onChange={event => setTitle(event.target.value)} />}</div>
     <div className="card-body nodrag">{back ? <div className="card-meta"><dl>
       <dt>ID</dt><dd>{card.id}</dd><dt>Type</dt><dd>Interactive</dd>
-      <dt>Tags</dt><dd>{!readOnly && <input aria-label="Card tags" placeholder="tag, tag" value={tags} onChange={event => setTags(event.target.value)} />}{tagDisplay.length ? tagDisplay.map(tag => onTagClick ? <button type="button" className="card-tag card-meta-link" key={tag} onClick={() => onTagClick(tag)}>{tag}</button> : <span className="card-tag" key={tag}>{tag}</span>) : readOnly ? '—' : null}</dd>
-      <dt title="Links are bidirectional: adding or removing one updates both cards.">Links ↔</dt><dd>{!readOnly && <input aria-label="Card links" value={links} onChange={event => setLinks(event.target.value)} />}{linkDisplay.length ? linkDisplay.map(linkedId => onLinkClick ? <button type="button" className="card-tag card-meta-link" key={linkedId} onClick={() => onLinkClick(linkedId)}>{linkedId}</button> : <span className="card-tag" key={linkedId}>{linkedId}</span>) : readOnly ? '—' : null}</dd>
+      <dt>Title</dt><dd>{editing ? <input aria-label="Interactive card title" maxLength={120} value={title} onChange={event => setTitle(event.target.value)} /> : title || '—'}</dd>
+      <dt>Tags</dt><dd>{editing ? <input aria-label="Card tags" placeholder="tag, tag" value={tags} onChange={event => setTags(event.target.value)} /> : tagDisplay.length ? tagDisplay.map(tag => onTagClick ? <button type="button" className="card-tag card-meta-link" key={tag} onClick={() => onTagClick(tag)}>{tag}</button> : <span className="card-tag" key={tag}>{tag}</span>) : '—'}</dd>
+      <dt title="Links are bidirectional: adding or removing one updates both cards.">Links ↔</dt><dd>{editing ? <input aria-label="Card links" placeholder="2026-10-03-0001, 2026-10-03-0002" value={links} onChange={event => setLinks(event.target.value)} /> : linkDisplay.length ? linkDisplay.map(linkedId => onLinkClick ? <button type="button" className="card-tag card-meta-link" key={linkedId} onClick={() => onLinkClick(linkedId)}>{linkedId}</button> : <span className="card-tag" key={linkedId}>{linkedId}</span>) : '—'}</dd>
     </dl></div>
       : readOnly ? <div className="interactive-library-message">Interactive content runs only when placed on a canvas.</div> : <InteractiveContent card={card} />}</div>
     {!readOnly && <div className="card-footer nodrag"><div className={status.state === 'error' ? 'node-error' : 'card-count'} role="status">{status.state === 'error' ? `Not saved: ${status.error}` : status.state === 'saving' ? 'Saving…' : 'Saved'}{status.state === 'error' && <button type="button" onClick={() => autosaver.current?.update(title, tags, links)}>Retry</button>}</div>{onDelete && <button type="button" className="card-delete" onClick={onDelete}>Delete permanently…</button>}</div>}

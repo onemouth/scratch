@@ -13,7 +13,7 @@ Only the semantic API creates or changes executable source. There is no human HT
 - tags and reciprocal links
 - zero or more private image/audio/video assets
 
-Human UI can edit title, tags and links, flip metadata, navigate tags/links, manage view membership, move/resize/remove placement, and permanently delete the card. Card type and ID are immutable. HTML cannot contain `<script>`, `<style>`, nested browsing/plugin/navigation metadata, or forms; executable code belongs in `javascript` and stylesheet rules belong in `css`. HTML `src`/`href`/`poster` URLs must be `card-asset://…`, `data:…`, or a local `#fragment`. Audio/video autoplay attributes are rejected.
+The toolbar shows a read-only title beside the metadata and placement controls, leaving the full front body for the runtime. On the metadata back, the human UI can press Edit to change title, tags and links; outside edit mode those fields remain read-only. Humans can also navigate tags/links, manage view membership, move/resize/remove placement, and permanently delete the card. Card type and ID are immutable. HTML cannot contain `<script>`, `<style>`, nested browsing/plugin/navigation metadata, or forms; executable code belongs in `javascript` and stylesheet rules belong in `css`. HTML `src`/`href`/`poster` URLs must be `card-asset://…`, `data:…`, or a local `#fragment`. Audio/video autoplay attributes are rejected.
 
 The Card Library shows the title and an interactive-type marker without mounting a runtime. Search covers title, tags and ID but intentionally excludes executable source.
 
