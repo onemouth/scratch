@@ -108,6 +108,7 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .modal-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 24px; }
 .modal-actions button:not(.primary) { color: #bbc8df; border: 0; background: none; padding: 10px; }
 .zettel-card { height: 100%; display: flex; flex-direction: column; background: #e5e8fa; color: #202a40; border: 1px solid #adb8d2; border-radius: 8px; overflow: hidden; }
+.zettel-card.maximized { border: 0; border-radius: 0; box-shadow: none; }
 .card-drag-handle { display: flex; justify-content: flex-end; align-items: center; padding: 5px 9px; font-size: 11px; cursor: grab; background: #d2d9ef; }
 .card-drag-handle button, .card-toolbar button { border: 0; background: transparent; color: inherit; border-radius: 4px; }
 .card-toolbar button:hover { background: #bac5e0; }

@@ -23,7 +23,7 @@ export function reconcileCardDrafts(cards) {
 }
 function CardIcon({ type }) {
   return <svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
-    {type === 'flip' ? <><rect x="7" y="7" width="13" height="13" rx="2" /><path d="M16 4H4v12M4 4l4 4" /></> : type === 'edit' ? <><path d="m4 16 12-12 4 4-12 12-5 1zM14 6l4 4" /></> : type === 'done' ? <path d="m5 12 4 4L19 6" /> : type === 'add' ? <path d="M12 5v14M5 12h14" /> : <path d="m5 5 14 14M19 5 5 19" />}
+    {type === 'flip' ? <><rect x="7" y="7" width="13" height="13" rx="2" /><path d="M16 4H4v12M4 4l4 4" /></> : type === 'edit' ? <><path d="m4 16 12-12 4 4-12 12-5 1zM14 6l4 4" /></> : type === 'done' ? <path d="m5 12 4 4L19 6" /> : type === 'add' ? <path d="M12 5v14M5 12h14" /> : type === 'maximize' ? <rect x="4" y="4" width="16" height="16" rx="1" /> : type === 'restore' ? <><path d="M8 4H4v4M16 4h4v4M4 16v4h4M20 16v4h-4" /><rect x="8" y="8" width="8" height="8" /></> : <path d="m5 5 14 14M19 5 5 19" />}
   </svg>;
 }
 function interactiveDraft(title, tags, links) {
@@ -34,7 +34,7 @@ function interactiveDraft(title, tags, links) {
   return { title, tags: tagValues, links: validateCardLinks(links.split(/[,\s]+/).filter(Boolean)) };
 }
 
-function InteractiveCardFace({ card, readOnly, onRemove, onAdd, adding, onDelete, onTagClick, onLinkClick, draggable, draftScope, removeFromView }) {
+function InteractiveCardFace({ card, readOnly, onRemove, onAdd, adding, onDelete, onTagClick, onLinkClick, draggable, draftScope, removeFromView, maximized = false, onMaximize }) {
   const draftKey = draftScope + ':' + card.id;
   const restored = useRef(readOnly ? null : cardDrafts.get(draftKey));
   const [back, setBack] = useState(restored.current?.back ?? false);
@@ -71,6 +71,7 @@ function InteractiveCardFace({ card, readOnly, onRemove, onAdd, adding, onDelete
       <h3 className="interactive-toolbar-title" title={title}>{title}</h3>
       <button type="button" className="card-icon nodrag" title={back ? 'View content' : 'View metadata'} aria-label={back ? 'View card content' : 'View card metadata'} aria-pressed={back} onClick={() => setBack(value => !value)}><CardIcon type="flip" /></button>
       {!readOnly && back && <button type="button" className="card-icon nodrag" title={editing ? 'Done editing' : 'Edit card'} aria-label={editing ? 'Done editing card' : 'Edit card'} aria-pressed={editing} onClick={() => setEditing(value => !value)}><CardIcon type={editing ? 'done' : 'edit'} /></button>}
+      {onMaximize && <button type="button" className="card-icon nodrag" title={maximized ? 'Return to whiteboard' : 'Maximize card'} aria-label={maximized ? `Return card ${card.id} to whiteboard` : `Maximize card ${card.id}`} onClick={onMaximize}><CardIcon type={maximized ? 'restore' : 'maximize'} /></button>}
       {onAdd && <button type="button" className="card-icon nodrag" title="Add to Agent Canvas" aria-label="Add card to Agent Canvas" disabled={adding} onClick={onAdd}><CardIcon type="add" /></button>}
       {onRemove && <button type="button" className="card-icon nodrag" title={removeFromView ? 'Remove from current view (keeps library card)' : 'Remove from Canvas (keeps card)'} aria-label={removeFromView ? 'Remove card from current view' : 'Remove card from Canvas'} onClick={onRemove}><CardIcon type="remove" /></button>}
     </header>
@@ -85,7 +86,7 @@ function InteractiveCardFace({ card, readOnly, onRemove, onAdd, adding, onDelete
   </div>;
 }
 
-function MarkdownCardFace({ card, readOnly = false, onRemove, onAdd, adding = false, onDelete, onTagClick, onLinkClick, fontSize, draggable = false, draftScope = 'agents', removeFromView = false }) {
+function MarkdownCardFace({ card, readOnly = false, onRemove, onAdd, adding = false, onDelete, onTagClick, onLinkClick, fontSize, draggable = false, draftScope = 'agents', removeFromView = false, maximized = false, onMaximize }) {
   const media = useCardUpload(card);
   const draftKey = draftScope + ':' + card.id;
   const restored = useRef(readOnly ? null : cardDrafts.get(draftKey));
@@ -128,6 +129,7 @@ function MarkdownCardFace({ card, readOnly = false, onRemove, onAdd, adding = fa
     <header className={onRemove || draggable ? 'card-toolbar card-drag-handle' : 'card-toolbar'} aria-label={onRemove || draggable ? 'Drag to move card' : 'Card controls'}>
       <button type="button" className="card-icon nodrag" title={back ? 'View content' : 'View metadata'} aria-label={back ? 'View card content' : 'View card metadata'} aria-pressed={back} onClick={() => setBack(value => !value)}><CardIcon type="flip" /></button>
       {!readOnly && <button type="button" className="card-icon nodrag" title={editing ? 'Done editing' : 'Edit card'} aria-label={editing ? 'Done editing card' : 'Edit card'} aria-pressed={editing} onClick={() => setEditing(value => !value)}><CardIcon type={editing ? 'done' : 'edit'} /></button>}
+      {onMaximize && <button type="button" className="card-icon nodrag" title={maximized ? 'Return to whiteboard' : 'Maximize card'} aria-label={maximized ? `Return card ${card.id} to whiteboard` : `Maximize card ${card.id}`} onClick={onMaximize}><CardIcon type={maximized ? 'restore' : 'maximize'} /></button>}
       {onAdd && <button type="button" className="card-icon nodrag" title="Add to Agent Canvas" aria-label="Add card to Agent Canvas" disabled={adding} onClick={onAdd}><CardIcon type="add" /></button>}
       {onRemove && <button type="button" className="card-icon nodrag" title={removeFromView ? "Remove from current view (keeps library card)" : "Remove from Canvas (keeps card)"} aria-label={removeFromView ? "Remove card from current view" : "Remove card from Canvas"} onClick={onRemove}><CardIcon type="remove" /></button>}
     </header>
@@ -148,9 +150,20 @@ export function CardFace(props) {
 }
 
 export function CardNode({ id, data, selected }) {
-  const { zoom } = useViewport();
+  const { x, y, zoom } = useViewport();
   const width = useSyncExternalStore(subscribeViewportWidth, viewportWidth, viewportWidth);
-  const { fontSize } = cardTypography(width, zoom);
+  const [windowSize, setWindowSize] = useState(() => ({ width: innerWidth, height: innerHeight }));
+  useEffect(() => {
+    if (!data.maximized) return;
+    const resize = () => setWindowSize({ width: innerWidth, height: innerHeight });
+    window.addEventListener('resize', resize); resize();
+    return () => window.removeEventListener('resize', resize);
+  }, [data.maximized]);
+  const maximizeStyle = data.maximized ? {
+    position: 'absolute', left: -x / zoom - data.position.x, top: -y / zoom - data.position.y,
+    width: windowSize.width, height: windowSize.height, transform: `scale(${1 / zoom})`, transformOrigin: 'top left',
+  } : undefined;
+  const { fontSize } = cardTypography(width, data.maximized ? 1 : zoom);
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
   const resizeView = useRef(null);
@@ -174,12 +187,12 @@ export function CardNode({ id, data, selected }) {
     catch (e) { setError(e.message); }
   };
   return <>
-    <NodeResizer isVisible={selected} minWidth={data.card.type === 'interactive' ? 320 : 240} minHeight={240} onResizeStart={() => { resizeView.current = data.viewId; }} onResizeEnd={(_, p) => {
+    <NodeResizer isVisible={selected && !data.maximized} minWidth={data.card.type === 'interactive' ? 320 : 240} minHeight={240} onResizeStart={() => { resizeView.current = data.viewId; }} onResizeEnd={(_, p) => {
       if (data.cardBox && resizeView.current !== data.viewId) { queueMicrotask(() => data.restorePlacement(id, data.placement)); return; }
       request(placementPath, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message));
     }} />
-    <section className="zettel-card">
-      <CardFace card={data.card} onRemove={data.cardBox && (!data.viewId || data.systemView) ? undefined : remove} onAdd={data.cardBox && !data.inAgentCanvas ? add : undefined} adding={adding} onDelete={destroy} onTagClick={data.cardBox && data.viewId ? tag => data.onExploreTag(tag) : undefined} onLinkClick={data.cardBox && data.viewId ? linkedId => data.onExploreLink(data.card.id, linkedId) : undefined} fontSize={fontSize} draftScope={data.cardBox ? 'card-box' : 'agents'} removeFromView={!!data.cardBox} draggable />
+    <section className={`zettel-card${data.maximized ? ' maximized' : ''}`} style={maximizeStyle}>
+      <CardFace card={data.card} onRemove={data.cardBox && (!data.viewId || data.systemView) ? undefined : remove} onAdd={data.cardBox && !data.inAgentCanvas ? add : undefined} adding={adding} onDelete={destroy} onTagClick={data.cardBox && data.viewId ? tag => data.onExploreTag(tag) : undefined} onLinkClick={data.cardBox && data.viewId ? linkedId => data.onExploreLink(data.card.id, linkedId) : undefined} fontSize={fontSize} draftScope={data.cardBox ? 'card-box' : 'agents'} removeFromView={!!data.cardBox} draggable maximized={data.maximized} onMaximize={() => data.onMaximize(data.maximized ? null : id)} />
       {error && <div className="node-error" role="alert">{error}</div>}
     </section>
   </>;

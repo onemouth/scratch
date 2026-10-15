@@ -189,7 +189,7 @@ function Canvas() {
   const [nodes, setNodes] = useState([]);
   const [maximizedId, setMaximizedId] = useState(null);
   const [maximizeFocus, setMaximizeFocus] = useState(0);
-  const maximizeAgent = useCallback(id => { setMaximizedId(id); if (id) setMaximizeFocus(n => n + 1); }, []);
+  const maximizeNode = useCallback(id => { setMaximizedId(id); if (id) setMaximizeFocus(n => n + 1); }, []);
   const [form, setForm] = useState({ name: '', workdir: '', mode: 'new' });
   const [open, setOpen] = useState(false);
   const [savedWorkdirs, setSavedWorkdirs] = useState([]);
@@ -330,7 +330,12 @@ function Canvas() {
       previousActivity = new Map(next.agents.map(agent => [agent.id, agent.activity]));
       knownAgents = new Set(next.agents.map(agent => agent.id));
       setState(current => mergeViewSnapshot(current, next));
-      setMaximizedId(id => id && !next.agents.some(agent => agent.id === id) ? null : id);
+      setMaximizedId(id => {
+        if (!id) return null;
+        const live = next.agents.some(agent => agent.id === id) || (next.cardPlacements || []).some(placement => placement.id === id) ||
+          (next.cardBox?.placements || []).some(placement => `card-box-${placement.id}` === id);
+        return live ? id : null;
+      });
       // Initial load/reconnect does not steal focus; live API-created agents do.
       if (added?.length) focusAgent(added.at(-1).id, added.at(-1).workspace);
     };
@@ -345,7 +350,7 @@ function Canvas() {
         return {
           id: agent.id, type: 'agent', measured: measuredLike(old, agent.width, agent.height), dragging: old?.dragging, position: old?.dragging ? old.position : { x: agent.x, y: agent.y },
           style: { width: agent.width, height: agent.height, visibility: ((agent.workspace === 'card-box') === (mode === 'card-box')) ? 'visible' : 'hidden', pointerEvents: ((agent.workspace === 'card-box') === (mode === 'card-box')) ? 'auto' : 'none' }, zIndex: maximizedId === agent.id ? 10000 : undefined,
-          data: { agent, cardBox: agent.workspace === 'card-box', workspace: agent.workspace === 'card-box' ? 'card-box' : 'agents', position: old?.dragging ? old.position : { x: agent.x, y: agent.y }, maximized: maximizedId === agent.id, onMaximize: maximizeAgent, maximizeFocus, onFocus: focusAgent, focusRequest: !open && !docsOpen && focusTarget?.id === agent.id ? focusTarget.request : 0 }, selected: old?.selected,
+          data: { agent, cardBox: agent.workspace === 'card-box', workspace: agent.workspace === 'card-box' ? 'card-box' : 'agents', position: old?.dragging ? old.position : { x: agent.x, y: agent.y }, maximized: maximizedId === agent.id, onMaximize: maximizeNode, maximizeFocus, onFocus: focusAgent, focusRequest: !open && !docsOpen && focusTarget?.id === agent.id ? focusTarget.request : 0 }, selected: old?.selected,
         };
       }), ...(state.notes || []).map(note => {
         const old = byId.get(note.id);
@@ -353,17 +358,21 @@ function Canvas() {
       }), ...(state.cardPlacements || []).flatMap(placement => {
         const card = (state.cards || []).find(card => card.id === placement.cardId);
         if (!card) return [];
-        const old = byId.get(placement.id);
-        return [{ id: placement.id, type: 'card', measured: measuredLike(old, placement.width, placement.height), dragging: old?.dragging, dragHandle: '.card-drag-handle', position: old?.dragging ? old.position : { x: placement.x, y: placement.y }, style: { width: placement.width, height: placement.height, visibility: mode === 'agents' ? 'visible' : 'hidden', pointerEvents: mode === 'agents' ? 'auto' : 'none' }, data: { card, placement, restorePlacement, workspace: 'agents' }, selected: old?.selected }];
+        const old = byId.get(placement.id), position = old?.dragging ? old.position : { x: placement.x, y: placement.y };
+        return [{ id: placement.id, type: 'card', measured: measuredLike(old, placement.width, placement.height), dragging: old?.dragging, dragHandle: '.card-drag-handle', position, style: { width: placement.width, height: placement.height, visibility: mode === 'agents' ? 'visible' : 'hidden', pointerEvents: mode === 'agents' ? 'auto' : 'none' }, zIndex: maximizedId === placement.id ? 10000 : undefined, data: { card, placement, restorePlacement, workspace: 'agents', position, maximized: maximizedId === placement.id, onMaximize: maximizeNode }, selected: old?.selected }];
       }), ...(state.cardBox?.placements || []).flatMap(placement => {
         const card = (state.cards || []).find(card => card.id === placement.cardId);
         if (!card) return [];
         const id = `card-box-${placement.id}`, old = byId.get(id);
         const dragging = old?.dragging && old.data.viewId === state.cardBox.activeViewId;
-        return [{ id, type: 'card', measured: measuredLike(old, placement.width, placement.height), dragging, dragHandle: '.card-drag-handle', position: dragging ? old.position : { x: placement.x, y: placement.y }, style: { width: placement.width, height: placement.height, visibility: mode === 'card-box' ? 'visible' : 'hidden', pointerEvents: mode === 'card-box' ? 'auto' : 'none' }, data: { card, placement, restorePlacement, cardBox: true, viewId: state.cardBox.activeViewId, systemView, onExploreTag: exploreTag, onExploreLink: exploreLink, inAgentCanvas: (state.cardPlacements || []).some(item => item.cardId === card.id), workspace: 'card-box' }, selected: old?.selected }];
+        const position = dragging ? old.position : { x: placement.x, y: placement.y };
+        return [{ id, type: 'card', measured: measuredLike(old, placement.width, placement.height), dragging, dragHandle: '.card-drag-handle', position, style: { width: placement.width, height: placement.height, visibility: mode === 'card-box' ? 'visible' : 'hidden', pointerEvents: mode === 'card-box' ? 'auto' : 'none' }, zIndex: maximizedId === id ? 10000 : undefined, data: { card, placement, restorePlacement, cardBox: true, viewId: state.cardBox.activeViewId, systemView, onExploreTag: exploreTag, onExploreLink: exploreLink, inAgentCanvas: (state.cardPlacements || []).some(item => item.cardId === card.id), workspace: 'card-box', position, maximized: maximizedId === id, onMaximize: maximizeNode }, selected: old?.selected }];
       })];
     });
-  }, [mode, state.cardBox, state.agents, state.notes, state.cards, state.cardPlacements, focusTarget, open, docsOpen, focusAgent, exploreTag, exploreLink, maximizedId, maximizeAgent, maximizeFocus]);
+  }, [mode, state.cardBox, state.agents, state.notes, state.cards, state.cardPlacements, focusTarget, open, docsOpen, focusAgent, exploreTag, exploreLink, maximizedId, maximizeNode, maximizeFocus]);
+  useEffect(() => {
+    if (maximizedId && !nodes.some(node => node.id === maximizedId && node.data.workspace === mode)) setMaximizedId(null);
+  }, [maximizedId, nodes, mode]);
   const persistViewport = useCallback(async (id, viewport) => {
     if (!id) return;
     pendingViewports.current.set(id, (pendingViewports.current.get(id) || 0) + 1);

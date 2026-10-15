@@ -117,6 +117,13 @@ try {
  await wait('!!document.querySelector('+JSON.stringify(nodeSelector)+')');
  assert.equal(app.snapshot().cardBox.placements.length,1);
  assert.ok(await ev('!!document.querySelector(".card-library")'));
+ await ev('document.querySelector('+JSON.stringify(nodeSelector+' [aria-label="Maximize card '+card.id+'"]')+').click()');
+ await wait('!!document.querySelector('+JSON.stringify(nodeSelector+' .zettel-card.maximized')+')');
+ const maximizedCard=await ev('(()=>{const r=document.querySelector('+JSON.stringify(nodeSelector+' .zettel-card.maximized')+').getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()');
+ for(const [k,value] of Object.entries({x:0,y:0,width:1400,height:1000}))assert.ok(Math.abs(maximizedCard[k]-value)<1,'card '+k+' must fill webpage');
+ assert.equal(await ev('getComputedStyle(document.querySelector(".topbar")).display'),'none');
+ await ev('document.querySelector('+JSON.stringify(nodeSelector+' [aria-label="Return card '+card.id+' to whiteboard"]')+').click()');
+ await wait('!document.querySelector('+JSON.stringify(nodeSelector+' .zettel-card.maximized')+')');
  await libraryClick(card.id,'.library-preview');
  await wait('!!document.querySelector(".library-full-preview .katex")');
  assert.equal(await ev('document.querySelectorAll(".library-preview a").length'),0);
@@ -293,6 +300,12 @@ try {
  await wait('window.fixtureMessages.some(value=>value?.fixture==="started")');
  await wait('window.fixtureMessages.some(value=>value?.fixtureAsset===1)');
  await wait('window.fixtureMessages.some(value=>value?.networkBlocked===true)&&window.fixtureMessages.some(value=>value?.parentBlocked===true)');
+ await ev('window.originalInteractiveFrame=document.querySelector('+JSON.stringify(interactiveNode+' iframe')+');document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Maximize card '+interactive.id+'"]')+').click()');
+ await wait('!!document.querySelector('+JSON.stringify(interactiveNode+' .zettel-card.maximized')+')');
+ assert.equal(await ev('window.originalInteractiveFrame===document.querySelector('+JSON.stringify(interactiveNode+' iframe')+')'),true);
+ await ev('document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Return card '+interactive.id+' to whiteboard"]')+').click()');
+ await wait('!document.querySelector('+JSON.stringify(interactiveNode+' .zettel-card.maximized')+')');
+ assert.equal(await ev('window.originalInteractiveFrame===document.querySelector('+JSON.stringify(interactiveNode+' iframe')+')'),true);
  const resizeMessages=await ev('window.fixtureMessages.filter(value=>value?.fixtureResize).length');
  const interactivePlacement=app.snapshot().cardBox.placements.find(value=>value.id===interactive.id);
  assert.deepEqual({width:interactivePlacement.width,height:interactivePlacement.height},{width:560,height:420});
