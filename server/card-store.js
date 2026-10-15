@@ -5,6 +5,8 @@ import { validateCardLinks } from '../shared/card-links.js';
 import { MEDIA, MEDIA_ID } from '../shared/card-media.js';
 import { publicMediaFile, validateMediaFile } from './card-media-store.js';
 import { inspectCardContent, validateCardContent } from '../shared/card-content.js';
+import { INTERACTIVE_LIMITS, validateInteractiveSource, validateInteractiveTitle } from './interactive-card.js';
+import { validateInteractiveAssetFile } from './interactive-asset-store.js';
 
 export function validateTags(tags) {
   if (!Array.isArray(tags) || tags.length > 30 || tags.some(tag => typeof tag !== 'string' || !tag.trim() || [...tag.trim()].length > 60 || /[,\n\r]/.test(tag))) throw new Error('tags must be an array of up to 30 non-empty strings, each at most 60 characters, without commas/newlines');
@@ -21,7 +23,7 @@ export class CardStore {
     try {
       if (file !== ':memory:') chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 4) throw new Error('Unsupported card database version');
+      if (version > 5) throw new Error('Unsupported card database version');
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
@@ -61,13 +63,33 @@ export class CardStore {
         PRAGMA user_version=4;
         COMMIT;
       `);
+      if (version < 5) {
+        this.db.exec('BEGIN IMMEDIATE');
+        try {
+          const columns = new Set(this.db.prepare('PRAGMA table_info(cards)').all().map(column => column.name));
+          const additions = {
+            type: "TEXT NOT NULL DEFAULT 'markdown'", title: "TEXT NOT NULL DEFAULT ''",
+            interactive_html: "TEXT NOT NULL DEFAULT ''", interactive_css: "TEXT NOT NULL DEFAULT ''",
+            interactive_javascript: "TEXT NOT NULL DEFAULT ''", interactive_revision: 'INTEGER NOT NULL DEFAULT 0',
+          };
+          for (const [name, declaration] of Object.entries(additions)) if (!columns.has(name)) this.db.exec(`ALTER TABLE cards ADD COLUMN ${name} ${declaration}`);
+          this.db.exec(`CREATE TABLE IF NOT EXISTS card_interactive_assets (
+            id TEXT PRIMARY KEY, card_id TEXT NOT NULL REFERENCES cards(id) ON DELETE CASCADE,
+            name TEXT NOT NULL, kind TEXT NOT NULL, mime TEXT NOT NULL, size INTEGER NOT NULL,
+            filename TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL, UNIQUE(card_id, name)
+          ); PRAGMA user_version=5; COMMIT;`);
+        } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+      }
     } catch (error) { this.db.close(); throw error; }
   }
-  decode(row) {
+  decode(row, { includeInteractiveSource = true } = {}) {
     if (!row) throw Object.assign(new Error('Card not found'), { status: 404 });
-    return { id: row.id, content: row.content, tags: JSON.parse(row.tags), links: validateCardLinks(JSON.parse(row.links)), units: inspectCardContent(row.content), ...this.cardMedia(row.id), createdAt: row.created_at, updatedAt: row.updated_at };
+    const common = { id: row.id, type: row.type, tags: JSON.parse(row.tags), links: validateCardLinks(JSON.parse(row.links)), createdAt: row.created_at, updatedAt: row.updated_at };
+    if (row.type === 'interactive') return { ...common, title: row.title, interactive: { ...(includeInteractiveSource ? { html: row.interactive_html, css: row.interactive_css, javascript: row.interactive_javascript } : {}), revision: row.interactive_revision }, assets: this.interactiveAssets(row.id) };
+    if (row.type !== 'markdown') throw new Error(`Unsupported card type: ${row.type}`);
+    return { ...common, content: row.content, units: inspectCardContent(row.content), ...this.cardMedia(row.id) };
   }
-  list() { return this.db.prepare('SELECT * FROM cards ORDER BY substr(id,1,10) DESC, CAST(substr(id,12) AS INTEGER) DESC').all().map(row => this.decode(row)); }
+  list(options) { return this.db.prepare('SELECT * FROM cards ORDER BY substr(id,1,10) DESC, CAST(substr(id,12) AS INTEGER) DESC').all().map(row => this.decode(row, options)); }
   get(id) { return this.decode(this.db.prepare('SELECT * FROM cards WHERE id=?').get(id)); }
   mediaFile(id) {
     const row = this.db.prepare('SELECT * FROM card_files WHERE id=?').get(id);
@@ -78,9 +100,49 @@ export class CardStore {
     const row = this.db.prepare('SELECT image_id, audio_id FROM card_media WHERE card_id=?').get(id);
     return { image: row?.image_id ? publicMediaFile(this.mediaFile(row.image_id)) : null, audio: row?.audio_id ? publicMediaFile(this.mediaFile(row.audio_id)) : null };
   }
+  interactiveAssets(id) {
+    return this.db.prepare('SELECT * FROM card_interactive_assets WHERE card_id=? ORDER BY name').all(id).map(row => {
+      const file = validateInteractiveAssetFile({ id: row.id, cardId: row.card_id, name: row.name, kind: row.kind, mime: row.mime, size: row.size, filename: row.filename, createdAt: row.created_at });
+      const { filename, cardId, ...metadata } = file;
+      return { ...metadata, url: '/api/interactive-assets/' + file.id };
+    });
+  }
+  interactiveAssetFile(id) {
+    const row = this.db.prepare('SELECT * FROM card_interactive_assets WHERE id=?').get(id);
+    if (!row) throw Object.assign(new Error('Interactive asset not found'), { status: 404 });
+    return validateInteractiveAssetFile({ id: row.id, cardId: row.card_id, name: row.name, kind: row.kind, mime: row.mime, size: row.size, filename: row.filename, createdAt: row.created_at });
+  }
+  addInteractiveAsset(cardId, file) {
+    validateInteractiveAssetFile(file);
+    const card = this.get(cardId);
+    if (card.type !== 'interactive') throw new Error('Interactive assets require an interactive card');
+    const total = this.db.prepare('SELECT COALESCE(SUM(size),0) AS size FROM card_interactive_assets WHERE card_id=?').get(cardId).size;
+    if (total + file.size > INTERACTIVE_LIMITS.totalAssetBytes) throw Object.assign(new Error('Interactive card assets exceed 100 MB'), { status: 413 });
+    const timestamp = this.now().toISOString();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('INSERT INTO card_interactive_assets (id,card_id,name,kind,mime,size,filename,created_at) VALUES (?,?,?,?,?,?,?,?)')
+        .run(file.id, cardId, file.name, file.kind, file.mime, file.size, file.filename, file.createdAt);
+      this.db.prepare('UPDATE cards SET interactive_revision=interactive_revision+1, updated_at=? WHERE id=?').run(timestamp, cardId);
+      this.db.exec('COMMIT'); return this.get(cardId);
+    } catch (error) { this.db.exec('ROLLBACK'); if (String(error.message).includes('UNIQUE constraint')) throw Object.assign(new Error(`Interactive asset name already exists: ${file.name}`), { status: 409 }); throw error; }
+  }
+  removeInteractiveAsset(cardId, name) {
+    const card = this.get(cardId);
+    if (card.type !== 'interactive') throw new Error('Interactive assets require an interactive card');
+    const row = this.db.prepare('SELECT * FROM card_interactive_assets WHERE card_id=? AND name=?').get(cardId, name);
+    if (!row) throw Object.assign(new Error('Interactive asset not found'), { status: 404 });
+    const timestamp = this.now().toISOString();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.prepare('DELETE FROM card_interactive_assets WHERE id=?').run(row.id);
+      this.db.prepare('UPDATE cards SET interactive_revision=interactive_revision+1, updated_at=? WHERE id=?').run(timestamp, cardId);
+      this.db.exec('COMMIT'); return { card: this.get(cardId), file: { filename: row.filename } };
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
   assertMediaSlot(id, kind, expected) {
     if (!MEDIA[kind] || (expected !== null && (typeof expected !== 'string' || !MEDIA_ID.test(expected)))) throw new Error('Invalid attachment slot or expected ID');
-    this.get(id);
+    if (this.get(id).type !== 'markdown') throw new Error('Interactive cards use private interactive assets, not card attachment slots');
     const current = this.db.prepare(`SELECT ${kind}_id AS id FROM card_media WHERE card_id=?`).get(id)?.id ?? null;
     if (current !== expected) throw Object.assign(new Error('Attachment changed; refresh and confirm replacement again'), { status: 409 });
   }
@@ -122,15 +184,25 @@ export class CardStore {
       }
     }
   }
-  create({ content = '', tags = [], links = [] } = {}) {
-    validateCardContent(content); tags = validateTags(tags);
+  create(body = {}) {
+    if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Card creation requires an object');
+    const type = body.type ?? 'markdown';
+    if (!['markdown', 'interactive'].includes(type)) throw new Error('type must be markdown or interactive');
+    const allowed = type === 'interactive' ? ['type', 'title', 'html', 'css', 'javascript', 'tags', 'links'] : ['type', 'content', 'tags', 'links'];
+    if (Object.keys(body).some(key => !allowed.includes(key))) throw new Error(`Invalid ${type} card creation fields`);
+    let { content = '', title, html, css, javascript, tags = [], links = [] } = body;
+    let source;
+    if (type === 'interactive') { title = validateInteractiveTitle(title); source = validateInteractiveSource({ html, css, javascript }); content = ''; }
+    else validateCardContent(content);
+    tags = validateTags(tags);
     links = this.checkLinks(links);
     const date = this.now(), day = localDay(date), timestamp = date.toISOString();
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const { number } = this.db.prepare('INSERT INTO card_sequences(day,number) VALUES (?,1) ON CONFLICT(day) DO UPDATE SET number=number+1 RETURNING number').get(day);
       const id = day + '-' + String(number).padStart(4, '0');
-      this.db.prepare('INSERT INTO cards (id,content,tags,created_at,updated_at,links) VALUES (?,?,?,?,?,?)').run(id, content, JSON.stringify(tags), timestamp, timestamp, JSON.stringify(links));
+      this.db.prepare('INSERT INTO cards (id,content,tags,created_at,updated_at,links,type,title,interactive_html,interactive_css,interactive_javascript) VALUES (?,?,?,?,?,?,?,?,?,?,?)')
+        .run(id, content, JSON.stringify(tags), timestamp, timestamp, JSON.stringify(links), type, title ?? '', source?.html ?? '', source?.css ?? '', source?.javascript ?? '');
       this.syncReciprocalLinks(id, links, [], timestamp);
       this.db.exec('COMMIT');
       return this.get(id);
@@ -140,12 +212,27 @@ export class CardStore {
     this.db.exec('BEGIN IMMEDIATE');
     try {
       const card = this.get(id);
-      const content = body.content === undefined ? card.content : body.content;
+      const allowed = card.type === 'interactive' ? ['title', 'html', 'css', 'javascript', 'tags', 'links'] : ['content', 'tags', 'links'];
+      if (!body || typeof body !== 'object' || Object.keys(body).some(key => !allowed.includes(key))) throw new Error(`Invalid ${card.type} card update fields`);
       const tags = body.tags === undefined ? card.tags : validateTags(body.tags);
       const links = body.links === undefined ? card.links : this.checkLinks(body.links, id, card.links);
-      validateCardContent(content);
       const timestamp = this.now().toISOString();
-      this.db.prepare('UPDATE cards SET content=?, tags=?, links=?, updated_at=? WHERE id=?').run(content, JSON.stringify(tags), JSON.stringify(links), timestamp, id);
+      if (card.type === 'interactive') {
+        const title = body.title === undefined ? card.title : validateInteractiveTitle(body.title);
+        const source = validateInteractiveSource({
+          html: body.html === undefined ? card.interactive.html : body.html,
+          css: body.css === undefined ? card.interactive.css : body.css,
+          javascript: body.javascript === undefined ? card.interactive.javascript : body.javascript,
+        });
+        const sourceChanged = ['html', 'css', 'javascript'].some(key => body[key] !== undefined);
+        this.db.prepare(`UPDATE cards SET title=?, interactive_html=?, interactive_css=?, interactive_javascript=?,
+          interactive_revision=interactive_revision+?, tags=?, links=?, updated_at=? WHERE id=?`)
+          .run(title, source.html, source.css, source.javascript, sourceChanged ? 1 : 0, JSON.stringify(tags), JSON.stringify(links), timestamp, id);
+      } else {
+        const content = body.content === undefined ? card.content : body.content;
+        validateCardContent(content);
+        this.db.prepare('UPDATE cards SET content=?, tags=?, links=?, updated_at=? WHERE id=?').run(content, JSON.stringify(tags), JSON.stringify(links), timestamp, id);
+      }
       this.syncReciprocalLinks(id, links, card.links, timestamp);
       this.db.exec('COMMIT');
       return this.get(id);

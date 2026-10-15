@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { pathToFileURL, fileURLToPath } from 'node:url';
@@ -28,7 +28,9 @@ const wait=async (expression,sessionId)=>{for(let i=0;i<100;i++){if(await ev(exp
 const content = '# DH 密鑰交換\n\nShared $g^{ab}\\bmod p$.\n\n[Reference](https://example.com)';
 const children=[];
 try {
- app=createApp({port:0,publicOrigin:null,stateFile:join(dir,'canvas.json'),cardsFile:join(dir,'cards.sqlite'),sessionsRoot:join(dir,'sessions'),spawnAgent(){
+ const interactiveMediaRoot=join(dir,'media');await mkdir(join(interactiveMediaRoot,'images'),{recursive:true});
+ await writeFile(join(interactiveMediaRoot,'images','dot.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+AvzZAAAAAElFTkSuQmCC','base64'));
+ app=createApp({port:0,publicOrigin:null,stateFile:join(dir,'canvas.json'),cardsFile:join(dir,'cards.sqlite'),interactiveMediaRoot,sessionsRoot:join(dir,'sessions'),spawnAgent(){
    const child=new EventEmitter();
    Object.assign(child,{writes:[],onData:fn=>child.on('data',fn),onExit:fn=>child.on('exit',fn),write(data){this.writes.push(data);this.emit('data',data);},resize(){},kill(){this.emit('exit',{exitCode:0});}});
    children.push(child);setTimeout(()=>child.emit('data','Fixture terminal ready\r\n'),30);return child;
@@ -273,6 +275,42 @@ try {
  await wait('!!document.querySelector(".react-flow__node-card[data-id=\\"card-box-'+createdUnfiled.id+'\\"]")');
  assert.ok(app.snapshot().cardBox.views.find(view=>view.id===unfiled.id).placements.some(placement=>placement.id===createdUnfiled.id));
  console.log('Dynamic fixed Unfiled view and current-view card creation passed');
+ // Interactive cards stay inert in Library, run only after Play, resize with the card and reset on source updates.
+ const interactive=await api('/cards','POST',{type:'interactive',title:'Interactive fixture',html:'<button id="counter">Count</button><output id="value">0</output><img id="asset" src="card-asset://dot">',css:'button,output{font-size:24px;margin:12px}',javascript:'parent.postMessage({fixture:"started"},"*");try{void parent.document.body;parent.postMessage({parentBlocked:false},"*")}catch{parent.postMessage({parentBlocked:true},"*")}fetch("https://example.com/blocked").then(()=>parent.postMessage({networkBlocked:false},"*")).catch(()=>parent.postMessage({networkBlocked:true},"*"));addEventListener("resize",()=>parent.postMessage({fixtureResize:true},"*"));const image=document.querySelector("#asset");const assetReady=()=>parent.postMessage({fixtureAsset:image.naturalWidth},"*");if(image.complete)assetReady();else image.onload=assetReady;let count=0;document.querySelector("#counter").onclick=()=>document.querySelector("#value").textContent=String(++count)',tags:['interactive'],place:false});
+ await api('/cards/'+interactive.id+'/interactive-assets/import','POST',{kind:'image',source:'dot.png',name:'dot'});
+ await fill('[aria-label="Search cards"]','Interactive fixture');
+ await wait('document.querySelector(".library-interactive strong")?.textContent==="Interactive fixture"');
+ assert.equal(await ev('document.querySelector(".library-card iframe")===null'),true);
+ await ev('document.querySelector(".card-library header button[aria-label=\\"Close library\\"]").click()');
+ const interactiveNode='.react-flow__node-card[data-id="card-box-'+interactive.id+'"]';
+ await ev('document.querySelector(".react-flow__controls-fitview").click()');await delay(350);
+ await wait('!!document.querySelector('+JSON.stringify(interactiveNode+' iframe')+')');
+ await ev('window.fixtureMessages=[];window.addEventListener("message",event=>window.fixtureMessages.push(event.data))');
+ assert.equal(await ev('document.querySelector('+JSON.stringify(interactiveNode+' iframe')+').getAttribute("sandbox")'),'allow-scripts');
+ assert.ok(await ev('document.querySelector('+JSON.stringify(interactiveNode+' iframe')+').srcdoc.includes("default-src \'none\'")'));
+ assert.equal(await ev('window.fixtureMessages.some(value=>value?.fixture==="started")'),false);
+ await ev('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-play')+').click()');
+ await wait('window.fixtureMessages.some(value=>value?.fixture==="started")');
+ await wait('window.fixtureMessages.some(value=>value?.fixtureAsset===1)');
+ await wait('window.fixtureMessages.some(value=>value?.networkBlocked===true)&&window.fixtureMessages.some(value=>value?.parentBlocked===true)');
+ const resizeMessages=await ev('window.fixtureMessages.filter(value=>value?.fixtureResize).length');
+ const interactivePlacement=app.snapshot().cardBox.placements.find(value=>value.id===interactive.id);
+ assert.deepEqual({width:interactivePlacement.width,height:interactivePlacement.height},{width:560,height:420});
+ await api('/card-box/views/'+unfiled.id+'/cards/'+interactive.id,'PATCH',{width:620,height:460});
+ await wait('Math.abs(parseFloat(getComputedStyle(document.querySelector('+JSON.stringify(interactiveNode)+')).width)-620)<2');
+ await wait('window.fixtureMessages.filter(value=>value?.fixtureResize).length>'+String(resizeMessages));
+ const fitted=await ev('(()=>{const host=document.querySelector('+JSON.stringify(interactiveNode+' .interactive-content')+').getBoundingClientRect();const frame=document.querySelector('+JSON.stringify(interactiveNode+' iframe')+').getBoundingClientRect();return Math.abs(host.width-frame.width)<1&&Math.abs(host.height-frame.height)<1})()');
+ assert.equal(fitted,true);
+ assert.equal(await ev('document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Edit card"]')+')===null'),true);
+ await ev('(()=>{const input=document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Interactive card title"]')+');Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,"value").set.call(input,"Renamed interactive");input.dispatchEvent(new Event("input",{bubbles:true}))})()');
+ await wait('document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Interactive card title"]')+').value==="Renamed interactive"');
+ for(let i=0;i<20&&app.snapshot().cards.find(card=>card.id===interactive.id).title!=="Renamed interactive";i++)await delay(100);
+ assert.equal(app.snapshot().cards.find(card=>card.id===interactive.id).title,'Renamed interactive');
+ await api('/cards/'+interactive.id,'PATCH',{javascript:'throw new Error("Fixture boom")'});
+ await wait('!!document.querySelector('+JSON.stringify(interactiveNode+' .interactive-play')+')');
+ await ev('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-play')+').click()');
+ await wait('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-error')+')?.textContent.includes("Fixture boom")');
+ console.log('Sandboxed interactive card Play, resize, source reset and error boundary passed');
  if(process.env.CANVAS_SCREENSHOT)await writeFile(process.env.CANVAS_SCREENSHOT,Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));
  }
 }finally{

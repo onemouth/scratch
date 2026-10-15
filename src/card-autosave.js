@@ -9,7 +9,7 @@ export function cardDraft(content, tags, links = '') {
 }
 
 // Serialize writes so an older request cannot overwrite a newer draft.
-export function createCardAutosaver({ initial, save, onStatus, delay = 500 }) {
+export function createAutosaver({ initial, save, onStatus, validate, delay = 500 }) {
   let draft = { ...initial, links: initial.links || [] };
   let acknowledged = JSON.stringify(draft);
   let revision = 0;
@@ -40,9 +40,9 @@ export function createCardAutosaver({ initial, save, onStatus, delay = 500 }) {
   return {
     isDirty: () => running || dirty(),
     adopt(value) { if (!running && !dirty()) { value = { ...value, links: value.links || [] }; draft = value; acknowledged = JSON.stringify(value); } },
-    update(content, tags, links = '') {
+    update(...values) {
       clearTimeout(timer); timer = undefined; revision++;
-      try { draft = cardDraft(content, tags, links); invalid = ''; }
+      try { draft = validate(...values); invalid = ''; }
       catch (error) { invalid = error.message; report('error', invalid); return; }
       if (!dirty()) { report(running ? 'saving' : 'saved'); return; }
       report('saving');
@@ -53,4 +53,8 @@ export function createCardAutosaver({ initial, save, onStatus, delay = 500 }) {
       if (flush && !invalid && dirty()) { finishing = true; if (!running) void send(); }
     },
   };
+}
+
+export function createCardAutosaver(options) {
+  return createAutosaver({ ...options, validate: cardDraft });
 }

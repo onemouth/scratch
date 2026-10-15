@@ -1,6 +1,7 @@
 import http from 'node:http';
 import { parsePublicOrigin } from './public-origin.js';
 import { initializeMedia, storeMediaUpload, serveMedia } from './card-media-store.js';
+import { importInteractiveAsset, initializeInteractiveAssets, removeInteractiveAssetFile, serveInteractiveAsset } from './interactive-asset-store.js';
 import { CardStore } from './card-store.js';
 import { CardViews, validateViewport } from './card-views.js';
 import { searchCards } from '../shared/card-search.js';
@@ -60,6 +61,7 @@ async function savedWorkdirs(sessionRoot) {
 export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = pty.spawn, stateFile = null, cardsFile = stateFile ? stateFile + '.cards.sqlite' : ':memory:',
   publicOrigin = process.env.AGENT_CANVAS_PUBLIC_ORIGIN,
   mediaDirectory = cardsFile === ':memory:' ? null : dirname(resolve(cardsFile)),
+  interactiveMediaRoot = join(homedir(), 'Documents', 'agent-canvas', 'media'),
   sessionsRoot = process.env.PI_CODING_AGENT_SESSION_DIR || join(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'), 'sessions') } = {}) {
   const trustedPublicOrigin = parsePublicOrigin(publicOrigin);
   const agents = new Map();
@@ -87,7 +89,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     if (!live) return agent;
     const current = activity.get(agent.id);
     return { ...agent, activity: current?.state ?? 'unknown', ...(current?.summary ? { notificationSummary: current.summary } : {}) };
-  }), edges: [...edges.values()], notes: [...notes.values()], cardPlacements: [...cardPlacements.values()], cardBox: views?.snapshot({ live }) ?? { placements: [] }, ...(live ? { cards: cards?.list() ?? [] } : {}), persistence: { enabled: !!stateFile, error: saveError } });
+  }), edges: [...edges.values()], notes: [...notes.values()], cardPlacements: [...cardPlacements.values()], cardBox: views?.snapshot({ live }) ?? { placements: [] }, ...(live ? { cards: cards?.list({ includeInteractiveSource: false }) ?? [] } : {}), persistence: { enabled: !!stateFile, error: saveError } });
   const flush = () => {
     clearTimeout(saveTimer);
     saveTimer = undefined;
@@ -118,6 +120,8 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     }
   };
   const validText = (x, max = 10000) => typeof x === 'string' && x.trim().length > 0 && x.length <= max;
+  const validCardPlacementValue = (id, key, value) => ['x', 'y', 'width', 'height'].includes(key) && Number.isFinite(value) &&
+    (!['width', 'height'].includes(key) || value >= (key === 'width' && cards.get(id).type === 'interactive' ? 320 : 240));
   const requireAgent = (id) => {
     const agent = agents.get(id);
     if (!agent) throw Object.assign(new Error('Agent not found'), { status: 404 });
@@ -300,12 +304,14 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
         }
         const mediaFile = url.pathname.match(/^\/api\/card-files\/([^/]+)$/);
         if (mediaFile && ['GET', 'HEAD'].includes(req.method)) return await serveMedia(req, res, mediaDirectory, cards.mediaFile(mediaFile[1]));
+        const interactiveFile = url.pathname.match(/^\/api\/interactive-assets\/([^/]+)$/);
+        if (interactiveFile && ['GET', 'HEAD'].includes(req.method)) return await serveInteractiveAsset(req, res, mediaDirectory, cards.interactiveAssetFile(interactiveFile[1]));
         let body = {};
         if (['POST', 'PATCH', 'DELETE'].includes(req.method)) {
           let raw = '';
           for await (const chunk of req) {
             raw += chunk;
-            if (raw.length > 100000) throw Object.assign(new Error('Request too large'), { status: 413 });
+            if (raw.length > 16 * 1024 * 1024) throw Object.assign(new Error('Request too large'), { status: 413 });
           }
           if (raw) body = JSON.parse(raw);
           if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Expected JSON object');
@@ -316,6 +322,21 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           const [, id, kind] = mediaSlot;
           const card = cards.setMedia(id, kind, null, body.attachmentId);
           broadcast(); return reply(res, 200, card);
+        }
+        const interactiveImport = url.pathname.match(/^\/api\/cards\/([^/]+)\/interactive-assets\/import$/);
+        if (interactiveImport && req.method === 'POST') {
+          if (Object.keys(body).some(key => !['kind', 'source', 'name'].includes(key))) throw new Error('Asset import accepts kind, source and name');
+          const card = await importInteractiveAsset({ cardId: interactiveImport[1], kind: body.kind, source: body.source, name: body.name,
+            mediaRoot: interactiveMediaRoot, directory: mediaDirectory, commit: file => cards.addInteractiveAsset(interactiveImport[1], file) });
+          broadcast(); return reply(res, 201, card);
+        }
+        const interactiveAsset = url.pathname.match(/^\/api\/cards\/([^/]+)\/interactive-assets\/([^/]+)$/);
+        if (interactiveAsset && req.method === 'DELETE') {
+          if (Object.keys(body).length) throw new Error('Asset removal takes an empty object');
+          const name = decodeURIComponent(interactiveAsset[2]);
+          const removed = cards.removeInteractiveAsset(interactiveAsset[1], name);
+          await removeInteractiveAssetFile(mediaDirectory, removed.file.filename);
+          broadcast(); return reply(res, 200, removed.card);
         }
         if (url.pathname === '/api/canvas/reset' && req.method === 'POST') {
           if (body.confirm !== true) throw new Error('Reset requires confirm: true');
@@ -348,7 +369,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           if (!placement) return reply(res, 404, { error: 'Card box placement not found' });
           const updates = {};
           for (const [key, value] of Object.entries(body)) {
-            if (!['x', 'y', 'width', 'height'].includes(key) || !Number.isFinite(value) || (['width', 'height'].includes(key) && value < 240)) throw new Error('Invalid placement dimensions');
+            if (!validCardPlacementValue(placement.cardId, key, value)) throw new Error('Invalid placement dimensions');
             updates[key] = value;
           }
           Object.assign(placement, updates); broadcast(); return reply(res, 200, placement);
@@ -377,13 +398,13 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           else if (action === 'cards' && memberId && req.method === 'PATCH') {
             const placement = view.placements.get(memberId);
             if (!placement) return reply(res, 404, { error: 'View placement not found' });
-            for (const [k, v] of Object.entries(body)) if (!['x','y','width','height'].includes(k) || !Number.isFinite(v) || (['width','height'].includes(k) && v < 240)) throw new Error('Invalid placement dimensions');
+            for (const [k, v] of Object.entries(body)) if (!validCardPlacementValue(memberId, k, v)) throw new Error('Invalid placement dimensions');
             Object.assign(placement, body);
           } else return reply(res, 405, { error: 'Unsupported view operation' });
           broadcast(); return reply(res, 200, views.snapshot());
         }
         if (url.pathname === '/api/cards' && req.method === 'GET') {
-          const all = cards.list();
+          const all = cards.list({ includeInteractiveSource: false });
           if (!url.searchParams.has('q')) return reply(res, 200, { cards: all });
           const matches = searchCards(all, url.searchParams.get('q'));
           const limit = Number(url.searchParams.get('limit') ?? 24), offset = Number(url.searchParams.get('offset') ?? 0);
@@ -391,11 +412,13 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           return reply(res, 200, { cards: matches.slice(offset, offset + limit), total: matches.length, limit, offset });
         }
         if (url.pathname === '/api/cards' && req.method === 'POST') {
-          if (Object.keys(body).some(key => !['content', 'tags', 'links', 'place'].includes(key))) throw new Error('Allowed fields: content, tags, links, place');
+          if (Object.keys(body).some(key => !['type', 'content', 'title', 'html', 'css', 'javascript', 'tags', 'links', 'place'].includes(key))) throw new Error('Invalid card creation fields');
           if (body.place !== undefined && typeof body.place !== 'boolean') throw new Error('place must be boolean');
-          const card = cards.create(body);
+          const { place, ...cardInput } = body;
+          const card = cards.create(cardInput);
           views.addNew(card, cards.list());
-          if (body.place !== false) cardPlacements.set(card.id, { id: card.id, cardId: card.id, x: 0, y: 0, width: 340, height: 320 });
+          const size = card.type === 'interactive' ? { width: 560, height: 420 } : { width: 340, height: 320 };
+          if (body.place !== false) cardPlacements.set(card.id, { id: card.id, cardId: card.id, x: 0, y: 0, ...size });
           broadcast(); return reply(res, 201, card);
         }
         const cardMatch = url.pathname.match(/^\/api\/cards\/([^/]+)$/);
@@ -403,19 +426,24 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           const id = cardMatch[1];
           if (req.method === 'GET') return reply(res, 200, cards.get(id));
           if (req.method === 'PATCH') {
-            if (Object.keys(body).some(key => !['content', 'tags', 'links'].includes(key))) throw new Error('Only content, tags and links are editable; ID is immutable');
-            const card = cards.update(id, body); broadcast(); return reply(res, 200, card);
+            const card = cards.get(id);
+            const allowed = card.type === 'interactive' ? ['title', 'html', 'css', 'javascript', 'tags', 'links'] : ['content', 'tags', 'links'];
+            if (Object.keys(body).some(key => !allowed.includes(key))) throw new Error(`Editable fields for ${card.type} cards: ${allowed.join(', ')}; ID and type are immutable`);
+            const updated = cards.update(id, body); broadcast(); return reply(res, 200, updated);
           }
           if (req.method === 'DELETE') {
             if (body.confirm !== true) throw new Error('Permanent deletion requires confirm: true');
-            cards.delete(id); cardPlacements.delete(id); views.prune(cards.list()); broadcast(); return reply(res, 200, { ok: true });
+            const files = cards.get(id).type === 'interactive' ? cards.get(id).assets.map(asset => cards.interactiveAssetFile(asset.id).filename) : [];
+            cards.delete(id);
+            await Promise.all(files.map(filename => removeInteractiveAssetFile(mediaDirectory, filename)));
+            cardPlacements.delete(id); views.prune(cards.list()); broadcast(); return reply(res, 200, { ok: true });
           }
         }
         const placeCard = url.pathname.match(/^\/api\/cards\/([^/]+)\/placement$/);
         if (placeCard && req.method === 'POST') {
           const card = cards.get(placeCard[1]);
           if (Object.keys(body).length) throw new Error('Placement creation takes an empty object');
-          const placement = cardPlacements.get(card.id) || { id: card.id, cardId: card.id, x: 0, y: 0, width: 340, height: 320 };
+          const placement = cardPlacements.get(card.id) || { id: card.id, cardId: card.id, x: 0, y: 0, ...(card.type === 'interactive' ? { width: 560, height: 420 } : { width: 340, height: 320 }) };
           cardPlacements.set(card.id, placement); broadcast(); return reply(res, 200, placement);
         }
         const placementMatch = url.pathname.match(/^\/api\/card-placements\/([^/]+)$/);
@@ -427,7 +455,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           }
           const updates = {};
           for (const [key, value] of Object.entries(body)) {
-            if (!['x', 'y', 'width', 'height'].includes(key) || !Number.isFinite(value) || (['width', 'height'].includes(key) && value < 240)) throw new Error('Invalid placement dimensions');
+            if (!validCardPlacementValue(placement.cardId, key, value)) throw new Error('Invalid placement dimensions');
             updates[key] = value;
           }
           Object.assign(placement, updates); broadcast(); return reply(res, 200, placement);
@@ -595,6 +623,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
         cards = new CardStore(cardsFile);
         cards.list(); // Validate the database before accepting requests.
         await initializeMedia(mediaDirectory);
+        await initializeInteractiveAssets(mediaDirectory);
         await cards.backup();
       } // Fail closed: never overwrite a corrupt save.
       catch (error) { cards?.close(); unlockCards(); unlock(); throw error; }

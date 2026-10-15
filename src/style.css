@@ -133,6 +133,21 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .card-toolbar { display: flex; justify-content: flex-end; align-items: center; gap: 4px; min-height: 26px; padding: 4px 8px; border-bottom: 1px solid #bec8df; font-size: 11px; flex: none; }
 .card-body { flex: 1; min-height: 0; overflow: auto; }
 .card-body textarea { width: 100%; height: 100%; min-height: 120px; padding: 12px; border: 0; outline: none; resize: none; background: #f2f4fc; color: #202a40; font-family: ui-monospace, monospace; font-size: inherit; }
+.interactive-card-face .card-body { overflow: hidden; }
+.interactive-title { flex: none; padding: 6px 10px; border-bottom: 1px solid #bec8df; background: #dbe2f3; }
+.interactive-title input { width: 100%; padding: 4px 6px; color: #202a40; background: #f7f8fd; border: 1px solid #adb8d2; border-radius: 4px; font: 600 14px system-ui, sans-serif; }
+.interactive-title h3 { margin: 3px 5px; font: 600 15px system-ui, sans-serif; }
+.interactive-content { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; background: #fff; }
+.interactive-content iframe { display: block; width: 100%; height: 100%; border: 0; background: #fff; }
+.interactive-placeholder, .interactive-library-message { height: 100%; display: grid; place-items: center; padding: 16px; color: #66728c; text-align: center; }
+.interactive-play { position: absolute; inset: 50% auto auto 50%; translate: -50% -50%; min-width: 82px; padding: 9px 14px; color: white; background: #35477b; border: 1px solid #6579af; border-radius: 999px; box-shadow: 0 4px 14px #17213c55; }
+.interactive-restart { position: absolute; right: 8px; top: 8px; padding: 4px 7px; color: #273651; background: #f5f7fbe6; border: 1px solid #aab7cf; border-radius: 5px; font-size: 10px; }
+.interactive-error { position: absolute; inset: 0; z-index: 2; display: grid; place-content: center; gap: 8px; padding: 18px; color: #8c2634; background: #fff1f2f2; text-align: center; overflow-wrap: anywhere; }
+.interactive-error span { font: 11px ui-monospace, monospace; }
+.interactive-error button { justify-self: center; }
+.library-interactive { flex: 1; display: grid; place-content: center; gap: 6px; padding: 12px; text-align: center; }
+.library-interactive span { font-size: 28px; color: #586c9f; }
+.library-interactive small { color: #66728c; }
 .card-markdown, .card-meta { padding: 0 12px; overflow-wrap: anywhere; line-height: 1.5; -webkit-user-select: text; user-select: text; cursor: text; }
 .card-markdown h1 { font-size: 2em; }
 .card-markdown h2 { font-size: 1.5em; }
