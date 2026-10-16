@@ -79,7 +79,7 @@ try {
  const libraryClick=(id,selector)=>ev('(()=>{const card=Array.from(document.querySelectorAll(".library-card")).find(node=>node.textContent.includes('+JSON.stringify(id)+'));card.querySelector('+JSON.stringify(selector)+').click()})()');
  await click('.workspace-nav button','Card box');
  await wait('!!document.querySelector("[aria-label=\\"Current view\\"]")');
- await ev('window.originalTerminal=document.querySelector(".react-flow__node-agent .xterm")');
+ await ev('window.originalTerminal=document.querySelector(".card-box-agent-sidebar .xterm")');
  assert.ok(await ev('!!window.originalTerminal'));
  await click('.viewbar button','Library');
  await wait('document.querySelectorAll(".library-card").length===24');
@@ -96,7 +96,7 @@ try {
  await wait('!!document.querySelector(".agent-node.maximized")');
  const maximized=await ev('(()=>{const r=document.querySelector(".agent-node.maximized").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()');
  for(const [k,value] of Object.entries({x:0,y:0,width:1400,height:1000}))assert.ok(Math.abs(maximized[k]-value)<1,k+' must fill webpage');
- assert.ok(await ev('window.originalTerminal===document.querySelector(".react-flow__node-agent .xterm")'));
+ assert.ok(await ev('window.originalTerminal===document.querySelector(".card-box-agent-sidebar .xterm")'));
  await send('Input.dispatchKeyEvent',{type:'keyDown',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
  await send('Input.dispatchKeyEvent',{type:'keyUp',key:'Escape',code:'Escape',windowsVirtualKeyCode:27});
  await delay(100);assert.ok(children[0].writes.includes('\u001b'));
@@ -106,13 +106,26 @@ try {
  await wait('document.querySelector("[aria-label=\\"Current view\\"]").selectedOptions[0].textContent.includes("Temporary")');
  assert.equal(app.snapshot().cardBox.placements.length,0);
  assert.equal(await ev('Array.from(document.querySelectorAll(".react-flow__node-card")).filter(n=>getComputedStyle(n).visibility==="visible").length'),0);
- assert.ok(await ev('window.originalTerminal===document.querySelector(".react-flow__node-agent .xterm")'));
- const agentHandle=await ev('(()=>{const r=document.querySelector(".react-flow__node-agent .node-header").getBoundingClientRect();return{x:r.x+40,y:r.y+r.height/2}})()');
- await send('Input.dispatchMouseEvent',{type:'mousePressed',...agentHandle,button:'left',buttons:1,clickCount:1});
- for(let i=1;i<=5;i++)await send('Input.dispatchMouseEvent',{type:'mouseMoved',x:agentHandle.x+90*i/5,y:agentHandle.y+50*i/5,buttons:1});
- await send('Input.dispatchMouseEvent',{type:'mouseReleased',x:agentHandle.x+90,y:agentHandle.y+50,button:'left',buttons:0,clickCount:1});
- await delay(200);const sharedAgentPosition={x:app.snapshot().agents[0].x,y:app.snapshot().agents[0].y};
- assert.ok(sharedAgentPosition.x>40,'Shared agent remains draggable');
+ assert.ok(await ev('window.originalTerminal===document.querySelector(".card-box-agent-sidebar .xterm")'));
+ const sharedAgentPosition={x:app.snapshot().agents[0].x,y:app.snapshot().agents[0].y};
+ assert.equal(await ev('document.querySelectorAll(".react-flow__node-agent").length'),0,'Card box agent is docked, not a canvas node');
+ assert.equal(await ev('document.querySelectorAll(".card-box-agent-sidebar .react-flow__resize-control").length'),0,'Dock does not mount canvas resize controls');
+ const sidebarCanvasWidth=await ev('document.querySelector(".flow-area").getBoundingClientRect().width');
+ await ev('document.querySelector("[aria-label=\\"Hide agent sidebar\\"]").click()');
+ await wait('getComputedStyle(document.querySelector(".card-box-agent-sidebar")).display==="none"');
+ assert.ok(await ev('document.querySelector(".flow-area").getBoundingClientRect().width')>sidebarCanvasWidth);
+ assert.ok(await ev('window.originalTerminal===document.querySelector(".card-box-agent-sidebar .xterm")'));
+ await ev('document.querySelector("[aria-label=\\"Show Card box agent\\"]").click()');
+ await wait('getComputedStyle(document.querySelector(".card-box-agent-sidebar")).display!=="none"');
+ assert.equal(terminalSockets,1,'Hiding and showing sidebar retains the terminal WebSocket');
+ await click('.workspace-nav button','Agent Canvas');
+ await wait('getComputedStyle(document.querySelector(".card-box-agent-sidebar")).display==="none"');
+ await click('.workspace-nav button','Card box');
+ await wait('getComputedStyle(document.querySelector(".card-box-agent-sidebar")).display!=="none"');
+ assert.ok(await ev('window.originalTerminal===document.querySelector(".card-box-agent-sidebar .xterm")'));
+ assert.equal(terminalSockets,1,'Workspace changes retain the docked terminal WebSocket');
+ await fill('[aria-label="Search cards"]','crypto missing');
+ await wait('document.querySelectorAll(".library-card").length===2');
  await libraryClick(card.id,'footer button');
  await wait('!!document.querySelector('+JSON.stringify(nodeSelector)+')');
  assert.equal(app.snapshot().cardBox.placements.length,1);
@@ -154,7 +167,10 @@ try {
  await wait('document.querySelectorAll(".library-card").length===1 && document.querySelector(".library-card").textContent.includes('+JSON.stringify(general.id)+')');
  await ev('document.querySelector(".library-card footer button").click()');
  await wait('Array.from(document.querySelectorAll(".react-flow__node-card")).filter(n=>getComputedStyle(n).visibility==="visible").length===2');
- assert.ok(await ev('window.originalTerminal===document.querySelector(".react-flow__node-agent .xterm")'));
+ assert.ok(await ev('window.originalTerminal===document.querySelector(".card-box-agent-sidebar .xterm")'));
+ // Hide the dock to give native drag/resize fixtures their original canvas width.
+ await ev('document.querySelector("[aria-label=\\"Hide Card box agent\\"]").click()');
+ await wait('getComputedStyle(document.querySelector(".card-box-agent-sidebar")).display==="none"');
  // Native drag persists only this view's layout.
  const point=await ev('(()=>{const r=document.querySelector('+JSON.stringify(nodeSelector)+').querySelector(".card-toolbar").getBoundingClientRect();return{x:r.x+10,y:r.y+r.height/2};})()');
  await send('Input.dispatchMouseEvent',{type:'mousePressed',...point,button:'left',buttons:1,clickCount:1});
@@ -177,7 +193,7 @@ try {
  await select(original);await wait('document.querySelector("[aria-label=\\"Current view\\"]").value==='+JSON.stringify(original));
  await select(crypto);await wait('document.querySelector("[aria-label=\\"Current view\\"]").value==='+JSON.stringify(crypto));await delay(250);
  assert.deepEqual(app.snapshot().cardBox.placements.find(p=>p.id===card.id),placement);
- assert.ok(await ev('window.originalTerminal===document.querySelector(".react-flow__node-agent .xterm")'));
+ assert.ok(await ev('window.originalTerminal===document.querySelector(".card-box-agent-sidebar .xterm")'));
  // A shared view switch during a native drag must not write into the new view.
  const originalPlacement={...app.snapshot().cardBox.views.find(v=>v.id===original).placements.find(p=>p.id===card.id)};
  const dragPoint=await ev('(()=>{const r=document.querySelector('+JSON.stringify(nodeSelector)+').querySelector(".card-toolbar").getBoundingClientRect();return{x:r.x+10,y:r.y+r.height/2}})()');
@@ -205,7 +221,7 @@ try {
  await fillCard('Pending valid $x$');
  await click('.viewbar button','＋ New view');await wait('!document.querySelector('+JSON.stringify(nodeSelector)+')');
  await delay(600);assert.equal((await api('/cards/'+card.id)).content,'Pending valid $x$');
- assert.ok(await ev('window.originalTerminal===document.querySelector(".react-flow__node-agent .xterm")'));
+ assert.ok(await ev('window.originalTerminal===document.querySelector(".card-box-agent-sidebar .xterm")'));
  console.log('Library pagination, OR search, responsive grid, previews, membership, temporary choices, autosave, native drag/zoom, draft retention and terminal continuity passed');
  assert.equal(terminalSockets,1,'Switches/maximization must retain the original terminal WebSocket');
  // A second tab shares the active view; a stale dialog cannot discard a newer draft.
@@ -236,6 +252,9 @@ try {
  // Bring this tab to the foreground before checking geometry: Chrome defers
  // ResizeObserver/rAF measurements in background tabs.
  await send('Page.bringToFront');await delay(250);
+ assert.equal(await ev('getComputedStyle(document.querySelector(".card-box-agent-sidebar")).display'),'none','Sidebar preference survives reload');
+ await ev('document.querySelector("[aria-label=\\"Show Card box agent\\"]").click()');
+ await wait('getComputedStyle(document.querySelector(".card-box-agent-sidebar")).display!=="none"');
  await api('/card-box/views/'+active()+'/save','POST',{name:'Preview'});
  await api('/card-box/views/'+active()+'/cards/'+card.id,'POST',{});
  await api('/card-box/views/'+active()+'/cards/'+general.id,'POST',{});

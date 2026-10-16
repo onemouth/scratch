@@ -104,7 +104,7 @@ function AgentNode({ id, data, selected }) {
   }, [data.maximized]);
   // React Flow transforms both the viewport and the node. Cancel those transforms
   // only for this window; the saved node layout and the terminal DOM stay intact.
-  const maximizeStyle = data.maximized ? {
+  const maximizeStyle = data.maximized && data.docked ? { position: 'fixed', inset: 0, width: '100vw', height: '100vh', zIndex: 10001 } : data.maximized ? {
     position: 'absolute', left: -x / zoom - data.position.x, top: -y / zoom - data.position.y,
     width: windowSize.width, height: windowSize.height, transform: `scale(${1 / zoom})`, transformOrigin: 'top left',
   } : undefined;
@@ -113,12 +113,13 @@ function AgentNode({ id, data, selected }) {
     try { await api(`/agents/${id}`, 'DELETE'); } catch (e) { setError(e.message); }
   };
   return <>
-    <NodeResizer isVisible={selected && !data.maximized} minWidth={320} minHeight={240} onResizeEnd={(_, p) => api(`/agents/${id}`, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message))} />
+    <NodeResizer isVisible={!data.docked && !!selected && !data.maximized} minWidth={320} minHeight={240} onResizeEnd={(_, p) => api(`/agents/${id}`, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message))} />
     <div className={`agent-node ${agent.status}${data.maximized ? ' maximized' : ''}`} style={maximizeStyle}>
     {!data.cardBox && <Handle type="target" position={Position.Left} />}
     <header className="node-header">
       <span className="status-dot" /><AgentName id={agent.id} name={agent.name} onError={setError} /><span className="badge">{agent.status}</span>
       <button type="button" className="icon-btn nodrag" title={data.maximized ? 'Return to whiteboard' : 'Maximize agent'} aria-label={data.maximized ? `Return ${agent.name} to whiteboard` : `Maximize ${agent.name}`} onClick={() => data.onMaximize(data.maximized ? null : id)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{data.maximized ? <><path d="M8 4H4v4M16 4h4v4M4 16v4h4M20 16v4h-4" /><rect x="8" y="8" width="8" height="8" /></> : <rect x="4" y="4" width="16" height="16" rx="1" />}</svg></button>
+      {data.docked && !data.maximized && <button type="button" className="icon-btn nodrag" title="Hide agent sidebar" aria-label="Hide agent sidebar" onClick={data.onHide}>→</button>}
       {agent.status === 'running' && <button className="icon-btn nodrag" title="Stop agent" aria-label={`Stop ${agent.name}`} onClick={stop}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 5l14 14M19 5L5 19" /></svg></button>}
       {agent.status === 'stopped' && <button className="icon-btn nodrag" title="Reopen conversation (no task sent)" aria-label={`Resume ${agent.name}`} onClick={() => api(`/agents/${id}/resume`, 'POST').then(() => data.onFocus(id)).catch(e => setError(e.message))}>▶</button>}
       {agent.status === 'stopped' && !data.cardBox && <button className="icon-btn nodrag" title="Remove node from canvas" aria-label={`Remove ${agent.name} from canvas`} onClick={remove}>×</button>}
@@ -200,6 +201,12 @@ function Canvas() {
     try { return localStorage.getItem('agent-canvas:workspace') === 'card-box' ? 'card-box' : 'agents'; } catch { return 'agents'; }
   });
   const [libraryOpen, setLibraryOpen] = useState(false);
+  const [agentSidebarOpen, setAgentSidebarOpen] = useState(() => {
+    try { return localStorage.getItem('agent-canvas:card-box-agent-sidebar') !== 'hidden'; } catch { return true; }
+  });
+  useEffect(() => {
+    try { localStorage.setItem('agent-canvas:card-box-agent-sidebar', agentSidebarOpen ? 'open' : 'hidden'); } catch {}
+  }, [agentSidebarOpen]);
   const mergeBox = useCallback(cardBox => setState(current => mergeViewResponse(current, cardBox)), []);
   useEffect(() => { cardAudio.reconcile(state.cards || []); reconcileCardDrafts(state.cards || []); }, [state.cards]);
   useEffect(() => {
@@ -273,7 +280,9 @@ function Canvas() {
   const centeredRequest = React.useRef(0);
   const focusAgent = useCallback((id, workspace) => {
     const agent = stateRef.current.agents.find(agent => agent.id === id);
-    setMode((workspace || agent?.workspace) === 'card-box' ? 'card-box' : 'agents');
+    const cardBox = (workspace || agent?.workspace) === 'card-box';
+    setMode(cardBox ? 'card-box' : 'agents');
+    if (cardBox) setAgentSidebarOpen(true);
     setFocusTarget({ id, request: ++focusSequence.current });
   }, []);
   const switchMode = () => { setMaximizedId(null); setFocusTarget(null); setMode(value => value === 'agents' ? 'card-box' : 'agents'); };
@@ -311,7 +320,7 @@ function Canvas() {
       const added = knownAgents && next.agents.filter(agent => !knownAgents.has(agent.id));
       if (notificationsRef.current && typeof Notification !== 'undefined' && Notification.permission === 'granted') {
         for (const agent of completedAgents(previousActivity, next.agents)) {
-          const activeNode = document.activeElement?.closest?.('.react-flow__node-agent');
+          const activeNode = document.activeElement?.closest?.('.react-flow__node-agent, .card-box-agent-sidebar');
           if (document.hasFocus() && activeNode?.getAttribute('data-id') === agent.id) continue;
           try {
             const content = notificationContent(agent);
@@ -345,7 +354,7 @@ function Canvas() {
     const systemView = state.cardBox?.views?.find(view => view.id === state.cardBox.activeViewId)?.system;
     setNodes(previous => {
       const byId = new Map(previous.map(n => [n.id, n]));
-      return [...state.agents.map(agent => {
+      return [...state.agents.filter(agent => agent.workspace !== 'card-box').map(agent => {
         const old = byId.get(agent.id);
         return {
           id: agent.id, type: 'agent', measured: measuredLike(old, agent.width, agent.height), dragging: old?.dragging, position: old?.dragging ? old.position : { x: agent.x, y: agent.y },
@@ -371,8 +380,9 @@ function Canvas() {
     });
   }, [mode, state.cardBox, state.agents, state.notes, state.cards, state.cardPlacements, focusTarget, open, docsOpen, focusAgent, exploreTag, exploreLink, maximizedId, maximizeNode, maximizeFocus]);
   useEffect(() => {
-    if (maximizedId && !nodes.some(node => node.id === maximizedId && node.data.workspace === mode)) setMaximizedId(null);
-  }, [maximizedId, nodes, mode]);
+    const docked = mode === 'card-box' && state.agents.some(agent => agent.id === maximizedId && agent.workspace === 'card-box');
+    if (maximizedId && !docked && !nodes.some(node => node.id === maximizedId && node.data.workspace === mode)) setMaximizedId(null);
+  }, [maximizedId, nodes, mode, state.agents]);
   const persistViewport = useCallback(async (id, viewport) => {
     if (!id) return;
     pendingViewports.current.set(id, (pendingViewports.current.get(id) || 0) + 1);
@@ -491,14 +501,19 @@ function Canvas() {
       setForm(f => ({ ...f, name: '' })); setOpen(false);
     } catch (err) { setError(err.message); }
   };
+  const boxAgent = state.agents.find(agent => agent.workspace === 'card-box');
+  const boxAgentMaximized = !!boxAgent && maximizedId === boxAgent.id;
   return <div className={`app${maximizedId ? ' is-maximized' : ''}`}>
     <div className={`topbar${mode === 'card-box' ? ' has-view-controls' : ''}`}>
       <div className="workspace-nav"><div className="brand"><span className="brand-icon">✳</span> {mode === 'card-box' ? 'Card box' : 'Agent Canvas'} <small>PI WORKSPACE</small></div><button type="button" className="guide-button" onClick={switchMode}>{mode === 'agents' ? 'Card box' : 'Agent Canvas'}</button></div>
       {mode === 'card-box' && <ViewControls box={state.cardBox} libraryOpen={libraryOpen} onLibrary={() => setLibraryOpen(v => !v)} onChange={mergeBox} onError={setError} beforeSwitch={beforeViewSwitch} exploreRequest={exploreRequest} onExploreCreated={id => { fitViewRequest.current = id; }} />}
-      <div className="top-actions"><span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button notification-toggle" type="button" aria-label={notificationsEnabled ? 'Disable browser notifications' : 'Enable browser notifications'} title={notificationsEnabled ? 'Browser notifications on · click to turn off' : 'Browser notifications off · click to enable'} aria-pressed={notificationsEnabled} onClick={toggleNotifications}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4" />{!notificationsEnabled && <path d="M3 3l18 18" />}</svg></button>{mode === 'agents' && <button className="guide-button" onClick={resetCanvas}>Reset Canvas</button>}<button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" onClick={createCard}>＋ Card</button>{mode === 'agents' ? <><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></> : !state.agents.some(agent => agent.workspace === 'card-box') && <button className="primary" onClick={launchBoxAgent}>Start Card box agent</button>}</div>
+      <div className="top-actions">{mode === 'card-box' && boxAgent && <button type="button" className="guide-button" aria-label={agentSidebarOpen ? 'Hide Card box agent' : 'Show Card box agent'} aria-expanded={agentSidebarOpen} aria-controls="card-box-agent-sidebar" onClick={() => setAgentSidebarOpen(value => !value)}>Agent {agentSidebarOpen ? '→' : '←'}</button>}<span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button notification-toggle" type="button" aria-label={notificationsEnabled ? 'Disable browser notifications' : 'Enable browser notifications'} title={notificationsEnabled ? 'Browser notifications on · click to turn off' : 'Browser notifications off · click to enable'} aria-pressed={notificationsEnabled} onClick={toggleNotifications}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4" />{!notificationsEnabled && <path d="M3 3l18 18" />}</svg></button>{mode === 'agents' && <button className="guide-button" onClick={resetCanvas}>Reset Canvas</button>}<button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" onClick={createCard}>＋ Card</button>{mode === 'agents' ? <><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></> : !state.agents.some(agent => agent.workspace === 'card-box') && <button className="primary" onClick={launchBoxAgent}>Start Card box agent</button>}</div>
     </div>
     {mode === 'card-box' && libraryOpen && <CardLibrary cards={state.cards || []} box={state.cardBox} onChange={mergeBox} onClose={() => setLibraryOpen(false)} />}
-    <div className={`flow-area${mode === 'card-box' && state.cardBox?.views ? ' box-flow' : ''}${mode === 'card-box' && libraryOpen ? ' with-library' : ''}`}>
+    {boxAgent && <aside id="card-box-agent-sidebar" className={`card-box-agent-sidebar${boxAgentMaximized ? ' is-maximized' : ''}`} data-id={boxAgent.id} aria-label="Card box agent" style={{ display: mode === 'card-box' && (agentSidebarOpen || boxAgentMaximized) && (!maximizedId || boxAgentMaximized) ? undefined : 'none' }}>
+      <AgentNode id={boxAgent.id} data={{ agent: boxAgent, cardBox: true, docked: true, onHide: () => setAgentSidebarOpen(false), maximized: boxAgentMaximized, onMaximize: maximizeNode, maximizeFocus, onFocus: focusAgent, focusRequest: mode === 'card-box' && agentSidebarOpen && !open && !docsOpen && focusTarget?.id === boxAgent.id ? focusTarget.request : 0 }} />
+    </aside>}
+    <div className={`flow-area${mode === 'card-box' && state.cardBox?.views ? ' box-flow' : ''}${mode === 'card-box' && libraryOpen ? ' with-library' : ''}${mode === 'card-box' && boxAgent && agentSidebarOpen ? ' with-agent-sidebar' : ''}`}>
     <ReactFlow onMoveStart={onMoveStart} onMoveEnd={onMoveEnd} proOptions={{ hideAttribution: true }} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={!maximizedId && (pointerMode === 'mouse' ? [2] : true)} panOnScroll={!maximizedId && pointerMode === 'touchpad'} panOnScrollSpeed={1} zoomOnScroll={!maximizedId && pointerMode === 'mouse'} zoomOnPinch={!maximizedId} nodesDraggable={!maximizedId} nodesConnectable={!maximizedId && mode === 'agents'} zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>
       <Background color="#243148" gap={24} size={1} />
       <Controls fitViewOptions={{ nodes: nodes.filter(node => node.data.workspace === mode).map(node => ({ id: node.id })), padding: 0.3 }}>

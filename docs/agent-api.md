@@ -52,7 +52,7 @@ Files live in `images/` and `audios/` alongside SQLite. Replacing/unlinking atta
 
 ## Card box workspace lifecycle (human UI)
 
-Card box displays only the shared current view's cards in `state.cardBox.placements`. New library cards join this view in free grid slots without rearranging existing cards. The fixed Unfiled view dynamically displays cards with no membership in any other saved or temporary view. Permanent card deletion removes its Agent Canvas placement and memberships in every view. Switching views does not change the shared Card box agent's session, terminal, position or size.
+Card box displays only the shared current view's cards in `state.cardBox.placements`. New library cards join this view in free grid slots without rearranging existing cards. The fixed Unfiled view dynamically displays cards with no membership in any other saved or temporary view. Permanent card deletion removes its Agent Canvas placement and memberships in every view. The shared Card box agent lives in a collapsible right sidebar, not a draggable canvas node. Its stored coordinates remain for compatibility but are not used by the dock. Switching views/workspaces or hiding the sidebar does not stop or remount its terminal/session.
 
 - `POST /api/card-box/agent` with `{}`: create its single fixed New-session Pi agent in the database directory. Returns 201; subsequent launch attempts return 409. The agent appears in `state.agents` with `workspace: "card-box"`.
 - Use existing `/api/agents/:id/stop` and `/resume` for its lifecycle. Removal is rejected (409); delegation to/from it is rejected (400), including creating a child with its `parentId`.
