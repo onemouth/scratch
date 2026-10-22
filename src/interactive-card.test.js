@@ -10,6 +10,7 @@ test('interactive document is sandbox-oriented, asset-local and keeps scripts be
   assert.match(still, /img-src blob: data:/);
   assert.doesNotMatch(still, /document\.body\.textContent/);
   assert.match(still, /blob:photo/);
+  assert.match(still, /#interactive-root\{overflow:auto;overscroll-behavior:contain\}/);
   const running = buildInteractiveDocument(card, { photo: 'blob:photo' }, { run: true, nonce: 'n', token: 't' });
   assert.match(running, /nonce="n"/);
   assert.match(running, /<\\\/script>/);

@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { buildInteractiveDocument, usesInteractiveRuntime } from './interactive-card.js';
+import { forwardInteractiveWheel } from './interactive-scroll.js';
 
 const identifier = () => globalThis.crypto?.randomUUID?.() || Math.random().toString(36).slice(2);
 
@@ -31,7 +32,7 @@ export function InteractiveContent({ card }) {
       const value = await response.json(); if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
       if (value.type !== 'interactive' || value.interactive.revision !== card.interactive.revision) throw new Error('Interactive source changed; waiting for refresh');
       const jsxgraph = value.interactive.javascript.trim() ? (await import('./jsxgraph-bundle.js')).jsxgraph : null;
-      if (!controller.signal.aborted) setSource({ state: 'ready', card: value, jsxgraph, error: '' });
+      if (!controller.signal.aborted) setSource({ state: 'ready', card: value, jsxgraph, identity, error: '' });
     }).catch(reason => { if (!controller.signal.aborted) setSource({ state: 'error', card: null, error: reason.message }); });
     return () => controller.abort();
   }, [identity, visible]);
@@ -41,6 +42,12 @@ export function InteractiveContent({ card }) {
     setAssets({ state: 'ready', urls, error: '' });
   }, [identity, visible, (card.assets || []).map(asset => `${asset.id}:${asset.url}`).join('|')]);
   useEffect(() => {
+    const element = host.current;
+    const wheel = event => forwardInteractiveWheel(event, frame.current, token);
+    element.addEventListener('wheel', wheel, { passive: false });
+    return () => element.removeEventListener('wheel', wheel);
+  }, [token]);
+  useEffect(() => {
     const receive = event => {
       if (event.source !== frame.current?.contentWindow || event.data?.type !== 'agent-canvas-interactive-error' || event.data.token !== token) return;
       setError(event.data.message || 'Interactive content failed'); setRunning(false);
@@ -49,18 +56,19 @@ export function InteractiveContent({ card }) {
     return () => window.removeEventListener('message', receive);
   }, [token]);
 
-  const document = source.state === 'ready' && assets.state === 'ready' && visible
+  const sourceReady = source.state === 'ready' && source.identity === identity;
+  const document = sourceReady && assets.state === 'ready' && visible
     ? buildInteractiveDocument(runtimeCard, assets.urls, { run: !dynamic || running, nonce, token, jsxgraph: source.jsxgraph }) : '';
   return <div className="interactive-content" ref={host}>
     {!visible ? <div className="interactive-placeholder">Interactive content paused</div>
       : source.state === 'error' ? <div className="interactive-error" role="alert">Interactive content failed<br /><span>{source.error}</span></div>
       : assets.state === 'error' ? <div className="interactive-error" role="alert">Interactive content failed<br /><span>{assets.error}</span></div>
-      : source.state !== 'ready' || assets.state !== 'ready' ? <div className="interactive-placeholder">Loading interactive content…</div>
+      : !sourceReady || assets.state !== 'ready' ? <div className="interactive-placeholder">Loading interactive content…</div>
       : <iframe ref={frame} key={`${identity}:${running}`} title={card.title} sandbox="allow-scripts" allow="autoplay; camera 'none'; microphone 'none'; geolocation 'none'; clipboard-read 'none'; clipboard-write 'none'" srcDoc={document} onLoad={event => {
           if (event.currentTarget.dataset.loaded) { setError('Navigation outside this card was blocked'); setRunning(false); return; }
           event.currentTarget.dataset.loaded = 'true';
         }} />}
-    {visible && source.state === 'ready' && assets.state === 'ready' && dynamic && !running && !error && <button type="button" className="interactive-play" onClick={() => setRunning(true)}>Play</button>}
+    {visible && sourceReady && assets.state === 'ready' && dynamic && !running && !error && <button type="button" className="interactive-play" onClick={() => setRunning(true)}>Play</button>}
     {visible && error && <div className="interactive-error" role="alert">Interactive content failed<br /><span>{error}</span><button type="button" onClick={() => { setError(''); setRunning(true); }}>Restart</button></div>}
     {visible && running && !error && <button type="button" className="interactive-restart" onClick={() => { setRunning(false); queueMicrotask(() => setRunning(true)); }}>Restart</button>}
   </div>;
