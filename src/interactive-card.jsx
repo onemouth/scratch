@@ -30,7 +30,8 @@ export function InteractiveContent({ card }) {
     fetch(`/api/cards/${encodeURIComponent(card.id)}`, { signal: controller.signal }).then(async response => {
       const value = await response.json(); if (!response.ok) throw new Error(value.error || `HTTP ${response.status}`);
       if (value.type !== 'interactive' || value.interactive.revision !== card.interactive.revision) throw new Error('Interactive source changed; waiting for refresh');
-      setSource({ state: 'ready', card: value, error: '' });
+      const jsxgraph = value.interactive.javascript.trim() ? (await import('./jsxgraph-bundle.js')).jsxgraph : null;
+      if (!controller.signal.aborted) setSource({ state: 'ready', card: value, jsxgraph, error: '' });
     }).catch(reason => { if (!controller.signal.aborted) setSource({ state: 'error', card: null, error: reason.message }); });
     return () => controller.abort();
   }, [identity, visible]);
@@ -49,7 +50,7 @@ export function InteractiveContent({ card }) {
   }, [token]);
 
   const document = source.state === 'ready' && assets.state === 'ready' && visible
-    ? buildInteractiveDocument(runtimeCard, assets.urls, { run: !dynamic || running, nonce, token }) : '';
+    ? buildInteractiveDocument(runtimeCard, assets.urls, { run: !dynamic || running, nonce, token, jsxgraph: source.jsxgraph }) : '';
   return <div className="interactive-content" ref={host}>
     {!visible ? <div className="interactive-placeholder">Interactive content paused</div>
       : source.state === 'error' ? <div className="interactive-error" role="alert">Interactive content failed<br /><span>{source.error}</span></div>

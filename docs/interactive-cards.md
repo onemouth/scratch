@@ -1,6 +1,6 @@
 # Interactive cards
 
-Interactive cards are a separate card type beside Markdown cards. They retain the normal immutable card ID, bidirectional links, tags, Card Library membership, saved/temporary views, Unfiled behavior, and Agent Canvas placement. Their default placement is 560×420 with the existing 240×240 Canvas minimum; aspect ratio is not fixed.
+Interactive cards are a separate card type beside Markdown cards. They retain the normal immutable card ID, bidirectional links, tags, Card Library membership, saved/temporary views, Unfiled behavior, and Agent Canvas placement. Their default placement is 560×420 with a 320×240 minimum; aspect ratio is not fixed.
 
 ## Data and authoring
 
@@ -19,11 +19,31 @@ The Card Library shows the title and an interactive-type marker without mounting
 
 ## Runtime and lifecycle
 
-The browser renders content in an iframe with `sandbox="allow-scripts"`, an opaque origin, and a restrictive CSP. It has no Canvas API, parent DOM, cookies, storage, forms, popups, downloads, external network, workers, camera, microphone, location, clipboard or top-level navigation. Content can use HTML/CSS, inline SVG, Canvas 2D, WebGL, JavaScript, Web Audio after activation, and imported image/audio/video blobs. WebGPU, WebAssembly, workers, custom web fonts, external libraries and CDNs are outside the first-version contract.
+The browser renders content in an iframe with `sandbox="allow-scripts"`, an opaque origin, and a restrictive CSP. It has no Canvas API, parent DOM, cookies, storage, forms, popups, downloads, external network, workers, camera, microphone, location, clipboard or top-level navigation. Content can use HTML/CSS, inline SVG, Canvas 2D, WebGL, JavaScript, Web Audio after activation, and imported image/audio/video blobs. WebGPU, WebAssembly, workers, custom web fonts, arbitrary external libraries and CDNs are unsupported. Locally bundled JSXGraph is available as described below.
 
 Pure HTML/CSS/SVG renders immediately. JavaScript or detected CSS animation remains behind Play; Restart creates a fresh runtime. Leaving the viewport or view destroys the iframe and runtime state. Returning starts from the static pre-Play state. Source or asset changes increment an interactive revision, destroy the old runtime and require activation again. Ordinary runtime errors are bounded, shown inside the card and offer Restart without corrupting parent state. The iframe is a capability boundary, not a CPU/memory quota: deliberately hostile or accidental infinite-loop JavaScript can still freeze the browser tab. Play is therefore a human trust boundary; inspect or regenerate questionable agent-authored source before running it.
 
 The iframe always fills the card's remaining content rectangle. SVG should use `viewBox`; HTML/CSS should use percentage sizing. Canvas code owns bitmap resolution and redraw and should listen for the normal `resize` event.
+
+## Built-in JSXGraph
+
+JSXGraph **1.14.1** is pinned and bundled locally under its MIT license. Interactive cards with JavaScript can use the `JXG` global directly; no `libraries` field, import, script tag or CDN URL is required. This is the JSXGraph math/geometry library, **not React JSX syntax**.
+
+The browser lazily loads the bundled text for visible JavaScript cards, then injects the library and its stylesheet into the sandbox. Library code executes only after Play and before agent-authored JavaScript, never in the parent Canvas. Each runtime gets a fresh instance. Defaults select SVG, disable external MathJax/KaTeX integrations, and disable JessieCode compilation so its internal expressions use the interpreter instead of eval. Network, dynamic evaluation (`eval`/`new Function`), WebAssembly and arbitrary library imports remain blocked by the unchanged CSP. Use JavaScript functions rather than expression strings that require dynamic compilation. External data/readers, external images and external math renderers are not supported; card-private assets remain available through the existing asset mechanism. JSXGraph's built-in resize observer follows card resizing and maximize/restore when the board container uses percentage dimensions.
+
+Example creation payload for `POST /api/cards`:
+
+```json
+{
+  "type": "interactive",
+  "title": "Explore y = a x²",
+  "html": "<div id=\"board\" class=\"jxgbox\"></div>",
+  "css": "#board { width: 100%; height: 100%; border: 0; }",
+  "javascript": "const board = JXG.JSXGraph.initBoard('board', { boundingbox: [-5, 5, 5, -5], axis: true, showCopyright: false, showNavigation: false }); const a = board.create('slider', [[-4, -3], [-1, -3], [0, 1, 3]], { name: 'a' }); board.create('functiongraph', [x => a.Value() * x * x]); board.create('point', [1, 1], { name: 'P' });",
+  "tags": ["math"],
+  "place": false
+}
+```
 
 ## Private assets
 

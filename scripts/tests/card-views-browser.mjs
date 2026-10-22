@@ -352,6 +352,34 @@ try {
  await ev('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-play')+').click()');
  await wait('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-error')+')?.textContent.includes("Fixture boom")');
  console.log('Sandboxed interactive card Play, resize, source reset and error boundary passed');
+ // Local JSXGraph runs in the existing opaque-origin sandbox; no CDN or eval permissions.
+ await api('/cards/'+interactive.id,'PATCH',{html:'<div id="math-board" class="jxgbox"></div>',css:'#math-board{width:100%;height:100%;border:0}',javascript:`
+ const board=JXG.JSXGraph.initBoard('math-board',{boundingbox:[-5,5,5,-5],axis:true,showCopyright:false,showNavigation:false});
+ const point=board.create('point',[1,2],{name:'P'});
+ const slider=board.create('slider',[[-4,-3],[-1,-3],[0,1,3]],{name:'a'});
+ const curve=board.create('functiongraph',[x=>slider.Value()*x*x]);
+ const report=()=>parent.postMessage({jsxgraphFixture:true,svg:document.querySelectorAll('svg').length,x:point.X(),a:slider.Value(),width:board.canvasWidth,curvePoints:curve.numberPoints,curveValue:curve.Y(2),interpreted:JXG.Options.jc.compile===false,path:curve.rendNode.getAttribute('d')?.length},'*');
+ addEventListener('message',event=>{if(event.data?.mathUpdate){point.moveTo([3,1]);slider.setValue(2);board.update();report()}});
+ addEventListener('resize',()=>setTimeout(report,150));
+ report();requestAnimationFrame(()=>{board.update();report()});`});
+ await wait('!!document.querySelector('+JSON.stringify(interactiveNode+' .interactive-play')+')');
+ assert.equal(await ev('window.fixtureMessages.some(value=>value?.jsxgraphFixture)'),false);
+ await ev('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-play')+').click()');
+ await wait('window.fixtureMessages.some(value=>value?.jsxgraphFixture&&value.svg>0&&value.x===1&&value.a===1)');
+ await wait('window.fixtureMessages.some(value=>value?.jsxgraphFixture&&value.interpreted&&value.curveValue===4&&value.curvePoints>2&&value.path>20)');
+ assert.equal(await ev('typeof window.JXG'),'undefined','Bundled library never executes in parent Canvas');
+ assert.equal(await ev('document.querySelector('+JSON.stringify(interactiveNode+' iframe')+').getAttribute("sandbox")'),'allow-scripts');
+ assert.equal(await ev('document.querySelector('+JSON.stringify(interactiveNode+' iframe')+').srcdoc.includes("unsafe-eval")'),false);
+ await ev('document.querySelector('+JSON.stringify(interactiveNode+' iframe')+').contentWindow.postMessage({mathUpdate:true},"*")');
+ await wait('window.fixtureMessages.some(value=>value?.jsxgraphFixture&&value.x===3&&value.a===2&&value.curveValue===8&&value.path>20)');
+ const graphPlacement={...app.snapshot().cardBox.placements.find(p=>p.id===interactive.id)};
+ await ev('window.mathFrame=document.querySelector('+JSON.stringify(interactiveNode+' iframe')+');document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Maximize card '+interactive.id+'"]')+').click()');
+ await wait('window.fixtureMessages.some(value=>value?.jsxgraphFixture&&value.width>1000&&value.x===3)');
+ assert.equal(await ev('window.mathFrame===document.querySelector('+JSON.stringify(interactiveNode+' iframe')+')'),true);
+ await ev('document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Return card '+interactive.id+' to whiteboard"]')+').click()');
+ await wait('!document.querySelector('+JSON.stringify(interactiveNode+' .zettel-card.maximized')+')');
+ assert.deepEqual(app.snapshot().cardBox.placements.find(p=>p.id===interactive.id),graphPlacement);
+ console.log('Locally bundled JSXGraph Play, SVG geometry, function graph, slider updates and responsive maximize passed');
  if(process.env.CANVAS_SCREENSHOT)await writeFile(process.env.CANVAS_SCREENSHOT,Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));
  }
 }finally{

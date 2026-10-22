@@ -16,6 +16,17 @@ test('interactive document is sandbox-oriented, asset-local and keeps scripts be
   assert.match(running, /agent-canvas-interactive-error/);
 });
 
+test('bundled JSXGraph is inert until Play and precedes agent code without relaxing CSP', () => {
+  const jsxgraph = { javascript: 'window.JXG={fixture:true};', css: '.jxgbox{position:relative}' };
+  const paused = buildInteractiveDocument(card, {}, { nonce: 'n', token: 't', jsxgraph });
+  assert.doesNotMatch(paused, /window\.JXG/);
+  assert.match(paused, /\.jxgbox/);
+  const running = buildInteractiveDocument(card, {}, { run: true, nonce: 'n', token: 't', jsxgraph });
+  assert.ok(running.indexOf(jsxgraph.javascript) < running.indexOf('document.body.textContent'));
+  assert.match(running, /script-src 'nonce-n'/);
+  assert.doesNotMatch(running, /unsafe-eval|wasm-unsafe-eval|https:\/\//);
+});
+
 test('runtime detection and missing asset replacement are deterministic', () => {
   assert.equal(usesInteractiveRuntime(card), true);
   assert.equal(usesInteractiveRuntime({ interactive: { css: '@keyframes spin{}', javascript: '' } }), true);
