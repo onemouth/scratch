@@ -338,6 +338,9 @@ try {
  assert.equal(await ev('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-toolbar-title')+').textContent'),'Interactive fixture');
  await ev('document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="View card metadata"]')+').click()');
  await wait('!!document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Edit card"]')+')');
+ await api('/card-box/views/'+unfiled.id+'/cards/'+interactive.id,'PATCH',{height:240});
+ await wait('(()=>{const body=document.querySelector('+JSON.stringify(interactiveNode+' .card-body')+');return body&&getComputedStyle(body).overflowY==="auto"&&body.scrollHeight>body.clientHeight})()');
+ assert.ok(await ev('(()=>{const body=document.querySelector('+JSON.stringify(interactiveNode+' .card-body')+');body.scrollTop=1000;return body.scrollTop>0})()'),'Interactive metadata remains scrollable in short cards');
  assert.equal(await ev('document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Interactive card title"]')+')===null'),true);
  await ev('document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Edit card"]')+').click()');
  await wait('!!document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Interactive card title"]')+')');
@@ -345,6 +348,8 @@ try {
  await wait('document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Interactive card title"]')+').value==="Renamed interactive"');
  for(let i=0;i<20&&app.snapshot().cards.find(card=>card.id===interactive.id).title!=="Renamed interactive";i++)await delay(100);
  assert.equal(app.snapshot().cards.find(card=>card.id===interactive.id).title,'Renamed interactive');
+ assert.ok(await ev('(()=>{const body=document.querySelector('+JSON.stringify(interactiveNode+' .card-body')+');body.scrollTop=1000;return body.scrollTop>0})()'),'Interactive metadata editor remains scrollable');
+ await api('/card-box/views/'+unfiled.id+'/cards/'+interactive.id,'PATCH',{height:460});
  await ev('document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Done editing card"]')+').click();document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="View card content"]')+').click()');
  await wait('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-toolbar-title')+').textContent==="Renamed interactive"');
  await api('/cards/'+interactive.id,'PATCH',{javascript:'throw new Error("Fixture boom")'});
@@ -352,7 +357,55 @@ try {
  await ev('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-play')+').click()');
  await wait('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-error')+')?.textContent.includes("Fixture boom")');
  console.log('Sandboxed interactive card Play, resize, source reset and error boundary passed');
+ // Local JSXGraph runs in the existing opaque-origin sandbox; no CDN or eval permissions.
+ await api('/cards/'+interactive.id,'PATCH',{html:'<div id="math-board" class="jxgbox"></div>',css:'#math-board{width:100%;height:100%;border:0}',javascript:`
+ const board=JXG.JSXGraph.initBoard('math-board',{boundingbox:[-5,5,5,-5],axis:true,showCopyright:false,showNavigation:false});
+ const point=board.create('point',[1,2],{name:'P'});
+ const slider=board.create('slider',[[-4,-3],[-1,-3],[0,1,3]],{name:'a'});
+ const curve=board.create('functiongraph',[x=>slider.Value()*x*x]);
+ const report=()=>parent.postMessage({jsxgraphFixture:true,svg:document.querySelectorAll('svg').length,x:point.X(),a:slider.Value(),width:board.canvasWidth,curvePoints:curve.numberPoints,curveValue:curve.Y(2),interpreted:JXG.Options.jc.compile===false,path:curve.rendNode.getAttribute('d')?.length},'*');
+ addEventListener('message',event=>{if(event.data?.mathUpdate){point.moveTo([3,1]);slider.setValue(2);board.update();report()}});
+ addEventListener('resize',()=>setTimeout(report,150));
+ report();requestAnimationFrame(()=>{board.update();report()});`});
+ await wait('!!document.querySelector('+JSON.stringify(interactiveNode+' .interactive-play')+')');
+ assert.equal(await ev('window.fixtureMessages.some(value=>value?.jsxgraphFixture)'),false);
+ await ev('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-play')+').click()');
+ await wait('window.fixtureMessages.some(value=>value?.jsxgraphFixture&&value.svg>0&&value.x===1&&value.a===1)');
+ await wait('window.fixtureMessages.some(value=>value?.jsxgraphFixture&&value.interpreted&&value.curveValue===4&&value.curvePoints>2&&value.path>20)');
+ assert.equal(await ev('typeof window.JXG'),'undefined','Bundled library never executes in parent Canvas');
+ assert.equal(await ev('document.querySelector('+JSON.stringify(interactiveNode+' iframe')+').getAttribute("sandbox")'),'allow-scripts');
+ assert.equal(await ev('document.querySelector('+JSON.stringify(interactiveNode+' iframe')+').srcdoc.includes("unsafe-eval")'),false);
+ await ev('document.querySelector('+JSON.stringify(interactiveNode+' iframe')+').contentWindow.postMessage({mathUpdate:true},"*")');
+ await wait('window.fixtureMessages.some(value=>value?.jsxgraphFixture&&value.x===3&&value.a===2&&value.curveValue===8&&value.path>20)');
+ const graphPlacement={...app.snapshot().cardBox.placements.find(p=>p.id===interactive.id)};
+ await ev('window.mathFrame=document.querySelector('+JSON.stringify(interactiveNode+' iframe')+');document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Maximize card '+interactive.id+'"]')+').click()');
+ await wait('window.fixtureMessages.some(value=>value?.jsxgraphFixture&&value.width>1000&&value.x===3)');
+ assert.equal(await ev('window.mathFrame===document.querySelector('+JSON.stringify(interactiveNode+' iframe')+')'),true);
+ await ev('document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Return card '+interactive.id+' to whiteboard"]')+').click()');
+ await wait('!document.querySelector('+JSON.stringify(interactiveNode+' .zettel-card.maximized')+')');
+ assert.deepEqual(app.snapshot().cardBox.placements.find(p=>p.id===interactive.id),graphPlacement);
+ console.log('Locally bundled JSXGraph Play, SVG geometry, function graph, slider updates and responsive maximize passed');
  if(process.env.CANVAS_SCREENSHOT)await writeFile(process.env.CANVAS_SCREENSHOT,Buffer.from((await send('Page.captureScreenshot',{format:'png'})).data,'base64'));
+ await api('/cards/'+interactive.id,'PATCH',{title:'Scrollable fixture',html:'<div style="height:1400px">Tall content<p style="padding-top:1200px">Bottom of content</p></div>',css:'',javascript:`const root=document.querySelector('#interactive-root');const report=()=>parent.postMessage({scrollFixture:true,overflow:getComputedStyle(root).overflowY,scrollable:root.scrollHeight>root.clientHeight,top:root.scrollTop},'*');root.addEventListener('scroll',report);report();requestAnimationFrame(report);setTimeout(report,150);`});
+ await wait('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-toolbar-title')+')?.textContent==="Scrollable fixture"');
+ await wait('!!document.querySelector('+JSON.stringify(interactiveNode+' .interactive-play')+')');
+ await ev('document.querySelector('+JSON.stringify(interactiveNode+' .interactive-play')+').click()');
+ await wait('window.fixtureMessages.some(value=>value?.scrollFixture&&value.scrollable&&value.overflow==="auto")');
+ const scrollViewport={...app.snapshot().cardBox.views.find(view=>view.id===unfiled.id).viewport};
+ const wheelPoint=await ev('(()=>{const r=document.querySelector('+JSON.stringify(interactiveNode+' iframe')+').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()');
+ await send('Input.dispatchMouseEvent',{type:'mouseMoved',...wheelPoint});await delay(300);
+ await send('Input.dispatchMouseEvent',{type:'mouseWheel',...wheelPoint,deltaX:0,deltaY:400});
+ await wait('window.fixtureMessages.some(value=>value?.scrollFixture&&value.top===400)');
+ await send('Input.dispatchMouseEvent',{type:'mouseWheel',...wheelPoint,deltaX:0,deltaY:-180});
+ await wait('window.fixtureMessages.some(value=>value?.scrollFixture&&value.top===220)');
+ assert.deepEqual(app.snapshot().cardBox.views.find(view=>view.id===unfiled.id).viewport,scrollViewport,'Scrolling iframe content must not zoom the canvas');
+ await ev('document.querySelector('+JSON.stringify(interactiveNode+' [aria-label="Maximize card '+interactive.id+'"]')+').click()');
+ await wait('!!document.querySelector('+JSON.stringify(interactiveNode+' .zettel-card.maximized')+')');
+ const maxWheelPoint=await ev('(()=>{const r=document.querySelector('+JSON.stringify(interactiveNode+' iframe')+').getBoundingClientRect();return{x:r.x+r.width/2,y:r.y+r.height/2}})()');
+ await send('Input.dispatchMouseEvent',{type:'mouseMoved',...maxWheelPoint});await delay(200);
+ await send('Input.dispatchMouseEvent',{type:'mouseWheel',...maxWheelPoint,deltaX:0,deltaY:100});
+ await wait('window.fixtureMessages.some(value=>value?.scrollFixture&&value.top===320)');
+ console.log('Interactive metadata read/edit overflow and real wheel scrolling at canvas zoom and maximized size passed');
  }
 }finally{
  ws?.close();if(chrome?.pid&&chrome.exitCode===null&&chrome.signalCode===null){const exited=new Promise(r=>chrome.once('exit',r));chrome.kill('SIGTERM');await Promise.race([exited,delay(3000)]);if(chrome.exitCode===null&&chrome.signalCode===null){chrome.kill('SIGKILL');await exited;}}

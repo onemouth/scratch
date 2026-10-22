@@ -75,7 +75,7 @@ function InteractiveCardFace({ card, readOnly, onRemove, onAdd, adding, onDelete
       {onAdd && <button type="button" className="card-icon nodrag" title="Add to Agent Canvas" aria-label="Add card to Agent Canvas" disabled={adding} onClick={onAdd}><CardIcon type="add" /></button>}
       {onRemove && <button type="button" className="card-icon nodrag" title={removeFromView ? 'Remove from current view (keeps library card)' : 'Remove from Canvas (keeps card)'} aria-label={removeFromView ? 'Remove card from current view' : 'Remove card from Canvas'} onClick={onRemove}><CardIcon type="remove" /></button>}
     </header>
-    <div className="card-body nodrag">{back ? <div className="card-meta"><dl>
+    <div className={back ? 'card-body nodrag' : 'card-body interactive-runtime-body nodrag'}>{back ? <div className="card-meta"><dl>
       <dt>ID</dt><dd>{card.id}</dd><dt>Type</dt><dd>Interactive</dd>
       <dt>Title</dt><dd>{editing ? <input aria-label="Interactive card title" maxLength={120} value={title} onChange={event => setTitle(event.target.value)} /> : title || '—'}</dd>
       <dt>Tags</dt><dd>{editing ? <input aria-label="Card tags" placeholder="tag, tag" value={tags} onChange={event => setTags(event.target.value)} /> : tagDisplay.length ? tagDisplay.map(tag => onTagClick ? <button type="button" className="card-tag card-meta-link" key={tag} onClick={() => onTagClick(tag)}>{tag}</button> : <span className="card-tag" key={tag}>{tag}</span>) : '—'}</dd>
