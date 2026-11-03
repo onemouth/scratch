@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { createServer as httpServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { testCanvasLayout } from './canvas-layout-browser.mjs';
 // All servers, data, PTYs and browser profiles below belong to this fixture.
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const require = createRequire(join(root,'package.json'));
@@ -77,6 +78,7 @@ try {
  const active=()=>app.snapshot().cardBox.activeViewId;
  const nodeSelector='.react-flow__node-card[data-id="card-box-'+card.id+'"]';
  const libraryClick=(id,selector)=>ev('(()=>{const card=Array.from(document.querySelectorAll(".library-card")).find(node=>node.textContent.includes('+JSON.stringify(id)+'));card.querySelector('+JSON.stringify(selector)+').click()})()');
+ await testCanvasLayout({ api, base, ev, send, wait, delay, cardId: card.id });
  await click('.workspace-nav button','Card box');
  await wait('!!document.querySelector("[aria-label=\\"Current view\\"]")');
  await ev('window.originalTerminal=document.querySelector(".card-box-agent-sidebar .xterm")');

@@ -17,7 +17,7 @@ function spawner() {
   return { spawn, children };
 }
 const request = async (app, path, body, method = 'POST') => {
-  const response = await fetch(`http://127.0.0.1:${app.server.address().port}/api${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const response = await fetch(`http://127.0.0.1:${app.server.address().port}/api${path}`, { method, headers: { 'Content-Type': 'application/json', 'X-Canvas-Layout': 'human' }, body: JSON.stringify(body) });
   return { status: response.status, data: await response.json() };
 };
 

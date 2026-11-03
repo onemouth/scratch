@@ -12,15 +12,16 @@ import './style.css';
 import { pasteChunks } from './terminal-paste.js';
 import { correctTerminalMouseScale } from './terminal-mouse-scale.js';
 import { completedAgents, notificationContent } from './agent-notifications.js';
-import { includeCreatedAgent } from './agent-state.js';
+import { includeCreatedAgent, agentsToFocus } from './agent-state.js';
 import { CardNode, reconcileCardDrafts } from './cards.jsx';
 import { AgentName } from './agent-name.jsx';
+import { beginLayoutInteraction, completeLayoutInteraction, humanLayoutHeaders } from './layout-interaction.js';
 import { CardLibrary, ViewControls } from './card-views.jsx';
 import { mergeViewResponse, mergeViewSnapshot, nodeMeasurement as measuredLike } from './card-view-state.js';
 import { cardsWithExactTag, recursivelyLinkedCards, uniqueViewName } from './card-view-explore.js';
 
 async function api(path, method = 'GET', body) {
-  const response = await fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json' }, body: body === undefined ? undefined : JSON.stringify(body) });
+  const response = await fetch(`/api${path}`, { method, headers: { 'Content-Type': 'application/json', ...humanLayoutHeaders }, body: body === undefined ? undefined : JSON.stringify(body) });
   const result = await response.json();
   if (!response.ok) throw new Error(result.error || `HTTP ${response.status}`);
   return result;
@@ -92,6 +93,8 @@ function PtyTerminal({ id, stopped, focusRequest }) {
 
 function AgentNode({ id, data, selected }) {
   const agent = data.agent;
+  const resizeInteraction = React.useRef(null);
+  useEffect(() => () => { resizeInteraction.current?.(); }, []);
   const [error, setError] = useState('');
   const { x, y, zoom } = useViewport();
   const [windowSize, setWindowSize] = useState(() => ({ width: innerWidth, height: innerHeight }));
@@ -113,7 +116,10 @@ function AgentNode({ id, data, selected }) {
     try { await api(`/agents/${id}`, 'DELETE'); } catch (e) { setError(e.message); }
   };
   return <>
-    <NodeResizer isVisible={!data.docked && !!selected && !data.maximized} minWidth={320} minHeight={240} onResizeEnd={(_, p) => api(`/agents/${id}`, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message))} />
+    <NodeResizer isVisible={!data.docked && !!selected && !data.maximized} minWidth={320} minHeight={240} onResizeStart={() => { resizeInteraction.current = beginLayoutInteraction('agent', id, e => setError(e.message)); }} onResizeEnd={(_, p) => {
+      const finish = resizeInteraction.current; resizeInteraction.current = null;
+      completeLayoutInteraction(finish, () => api(`/agents/${id}`, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height })).catch(e => setError(e.message));
+    }} />
     <div className={`agent-node ${agent.status}${data.maximized ? ' maximized' : ''}`} style={maximizeStyle}>
     {!data.cardBox && <Handle type="target" position={Position.Left} />}
     <header className="node-header">
@@ -135,6 +141,8 @@ function AgentNode({ id, data, selected }) {
 }
 
 function StickyNote({ id, data, selected }) {
+  const resizeInteraction = React.useRef(null);
+  useEffect(() => () => { resizeInteraction.current?.(); }, []);
   const { zoom } = useViewport();
   // Keep at least 14 screen pixels of text while the paper follows canvas zoom.
   const fontSize = Math.max(16, 14 / zoom);
@@ -148,7 +156,10 @@ function StickyNote({ id, data, selected }) {
     catch (e) { setError(e.message); }
   };
   return <>
-    <NodeResizer isVisible={selected} minWidth={160} minHeight={160} onResizeEnd={(_, p) => api(`/notes/${id}`, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message))} />
+    <NodeResizer isVisible={selected} minWidth={160} minHeight={160} onResizeStart={() => { resizeInteraction.current = beginLayoutInteraction('note', id, e => setError(e.message)); }} onResizeEnd={(_, p) => {
+      const finish = resizeInteraction.current; resizeInteraction.current = null;
+      completeLayoutInteraction(finish, () => api(`/notes/${id}`, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height })).catch(e => setError(e.message));
+    }} />
     <div className="sticky-note" style={{ fontSize }}>
     <div className="note-drag-handle" title="Drag to move note" />
     <button className="note-delete icon-btn nodrag" aria-label="Delete note" onClick={() => api(`/notes/${id}`, 'DELETE').catch(e => setError(e.message))}>×</button>
@@ -346,7 +357,8 @@ function Canvas() {
         return live ? id : null;
       });
       // Initial load/reconnect does not steal focus; live API-created agents do.
-      if (added?.length) focusAgent(added.at(-1).id, added.at(-1).workspace);
+      const focusable = agentsToFocus(added);
+      if (focusable.length) focusAgent(focusable.at(-1).id, focusable.at(-1).workspace);
     };
     return () => stream.close();
   }, [focusAgent]);
@@ -456,12 +468,18 @@ function Canvas() {
     setCenter(node.position.x + node.style.width / 2, node.position.y + node.style.height / 2, { zoom: getZoom(), duration: 200 });
   }, [nodes, mode, focusTarget, open, docsOpen, setCenter, getZoom]);
   const onNodesChange = useCallback(changes => setNodes(ns => applyNodeChanges(changes, ns)), []);
-  const onNodeDragStart = useCallback((_, node) => { dragTargets.current.set(node.id, node.data.viewId); }, []);
+  const dragInteractions = React.useRef(new Map());
+  useEffect(() => () => { for (const finish of dragInteractions.current.values()) finish(); }, []);
+  const onNodeDragStart = useCallback((_, node) => {
+    dragTargets.current.set(node.id, node.data.viewId);
+    if (node.data.workspace === 'agents') dragInteractions.current.set(node.id, beginLayoutInteraction(node.type, node.id, e => setError(e.message)));
+  }, []);
   const onNodeDragStop = useCallback((_, node) => {
     const source = dragTargets.current.get(node.id); dragTargets.current.delete(node.id);
     if (node.type === 'card' && node.data.cardBox && source !== stateRef.current.cardBox?.activeViewId) { restorePlacement(node.id, stateRef.current.cardBox?.placements.find(p => p.id === node.data.card.id)); return; }
     const path = node.type === 'card' ? (node.data.cardBox ? (source ? `/card-box/views/${source}/cards/${node.data.card.id}` : `/card-box/placements/${node.data.card.id}`) : `/card-placements/${node.data.card.id}`) : `/${node.type === 'note' ? 'notes' : 'agents'}/${node.id}`;
-    api(path, 'PATCH', { x: node.position.x, y: node.position.y }).catch(e => setError(e.message));
+    const finish = dragInteractions.current.get(node.id); dragInteractions.current.delete(node.id);
+    completeLayoutInteraction(finish, () => api(path, 'PATCH', { x: node.position.x, y: node.position.y })).catch(e => setError(e.message));
   }, [restorePlacement]);
   const onConnect = useCallback(async ({ source, target }) => { try { await api('/edges', 'POST', { source, target }); } catch (e) { setError(e.message); } }, []);
   const edges = useMemo(() => mode === 'card-box' ? [] : state.edges.map(edge => ({ ...edge, data: { label: edge.label || 'delegates', onError: setError }, markerEnd: { type: 'arrowclosed', color: '#8aa3e8' } })), [state.edges, mode]);
