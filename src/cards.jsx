@@ -3,6 +3,7 @@ import { cardTypography, viewportWidth, subscribeViewportWidth } from './card-ty
 import { CardAudio, CardImage, CardAttachmentInfo, useCardUpload } from './card-media.jsx';
 import { createAutosaver, createCardAutosaver } from './card-autosave.js';
 import { InteractiveContent } from './interactive-card.jsx';
+import { beginLayoutInteraction, completeLayoutInteraction, humanLayoutHeaders } from './layout-interaction.js';
 import { validateCardLinks } from '../shared/card-links.js';
 import { CardMarkdown } from './card-markdown.js';
 import 'katex/dist/katex.min.css';
@@ -10,7 +11,7 @@ import { NodeResizer, useViewport } from '@xyflow/react';
 import { CARD_LIMIT, inspectCardContent } from '../shared/card-content.js';
 
 async function request(path, method, body) {
-  const response = await fetch('/api' + path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+  const response = await fetch('/api' + path, { method, headers: { 'Content-Type': 'application/json', ...humanLayoutHeaders }, body: JSON.stringify(body) });
   const value = await response.json();
   if (!response.ok) throw new Error(value.error);
   return value;
@@ -167,6 +168,8 @@ export function CardNode({ id, data, selected }) {
   const [error, setError] = useState('');
   const [adding, setAdding] = useState(false);
   const resizeView = useRef(null);
+  const resizeInteraction = useRef(null);
+  useEffect(() => () => { resizeInteraction.current?.(); }, []);
   const add = async () => {
     setAdding(true); setError('');
     try { await request('/cards/' + data.card.id + '/placement', 'POST', {}); }
@@ -187,9 +190,13 @@ export function CardNode({ id, data, selected }) {
     catch (e) { setError(e.message); }
   };
   return <>
-    <NodeResizer isVisible={selected && !data.maximized} minWidth={data.card.type === 'interactive' ? 320 : 240} minHeight={240} onResizeStart={() => { resizeView.current = data.viewId; }} onResizeEnd={(_, p) => {
+    <NodeResizer isVisible={selected && !data.maximized} minWidth={data.card.type === 'interactive' ? 320 : 240} minHeight={240} onResizeStart={() => {
+      resizeView.current = data.viewId;
+      if (!data.cardBox) resizeInteraction.current = beginLayoutInteraction('card', data.card.id, e => setError(e.message));
+    }} onResizeEnd={(_, p) => {
       if (data.cardBox && resizeView.current !== data.viewId) { queueMicrotask(() => data.restorePlacement(id, data.placement)); return; }
-      request(placementPath, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height }).catch(e => setError(e.message));
+      const finish = resizeInteraction.current; resizeInteraction.current = null;
+      completeLayoutInteraction(finish, () => request(placementPath, 'PATCH', { x: p.x, y: p.y, width: p.width, height: p.height })).catch(e => setError(e.message));
     }} />
     <section className={`zettel-card${data.maximized ? ' maximized' : ''}`} style={maximizeStyle}>
       <CardFace card={data.card} onRemove={data.cardBox && (!data.viewId || data.systemView) ? undefined : remove} onAdd={data.cardBox && !data.inAgentCanvas ? add : undefined} adding={adding} onDelete={destroy} onTagClick={data.cardBox && data.viewId ? tag => data.onExploreTag(tag) : undefined} onLinkClick={data.cardBox && data.viewId ? linkedId => data.onExploreLink(data.card.id, linkedId) : undefined} fontSize={fontSize} draftScope={data.cardBox ? 'card-box' : 'agents'} removeFromView={!!data.cardBox} draggable maximized={data.maximized} onMaximize={() => data.onMaximize(data.maximized ? null : id)} />

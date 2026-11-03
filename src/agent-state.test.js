@@ -1,6 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { includeCreatedAgent } from './agent-state.js';
+import { includeCreatedAgent, agentsToFocus } from './agent-state.js';
+
+test('explicit API-positioned launches do not move the viewport or steal focus', () => {
+  const human = { id: 'human' }, positioned = { id: 'positioned', suppressAutoFocus: true };
+  assert.deepEqual(agentsToFocus(null), []);
+  assert.deepEqual(agentsToFocus([positioned]), []);
+  assert.deepEqual(agentsToFocus([human, positioned]), [human]);
+});
 
 test('a successful launch appears immediately even before an SSE update', () => {
   const existing = { id: 'existing', status: 'running' };

@@ -4,6 +4,7 @@ import { initializeMedia, storeMediaUpload, serveMedia } from './card-media-stor
 import { importInteractiveAsset, initializeInteractiveAssets, removeInteractiveAssetFile, serveInteractiveAsset } from './interactive-asset-store.js';
 import { CardStore } from './card-store.js';
 import { CardViews, validateViewport } from './card-views.js';
+import { CanvasLayout, LAYOUT_KEYS, hasLayout, layoutPatch } from './canvas-layout.js';
 import { searchCards } from '../shared/card-search.js';
 import { storagePaths } from './storage-paths.js';
 import { lockCanvas, loadCanvas, saveCanvas } from './canvas-store.js';
@@ -65,10 +66,17 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   sessionsRoot = process.env.PI_CODING_AGENT_SESSION_DIR || join(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'), 'sessions') } = {}) {
   const trustedPublicOrigin = parsePublicOrigin(publicOrigin);
   const agents = new Map();
+  const quietLayoutLaunches = new Set();
   const processes = new Map();
   const edges = new Map();
   const notes = new Map();
   const cardPlacements = new Map();
+  const canvasLayout = new CanvasLayout(() => [
+    ...[...agents.values()].filter(agent => agent.workspace !== 'card-box').map(agent => ({ kind: 'agent', ...geometry(agent) })),
+    ...[...notes.values()].map(note => ({ kind: 'note', ...geometry(note) })),
+    ...[...cardPlacements.values()].map(placement => ({ kind: 'card', ...geometry(placement) })),
+  ]);
+  function geometry({ id, x, y, width, height }) { return { id, x, y, width, height }; }
   let views;
   let cards;
   const clients = new Set();
@@ -88,7 +96,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   const snapshot = (live = true) => ({ agents: [...agents.values()].map(agent => {
     if (!live) return agent;
     const current = activity.get(agent.id);
-    return { ...agent, activity: current?.state ?? 'unknown', ...(current?.summary ? { notificationSummary: current.summary } : {}) };
+    return { ...agent, ...(quietLayoutLaunches.has(agent.id) ? { suppressAutoFocus: true } : {}), activity: current?.state ?? 'unknown', ...(current?.summary ? { notificationSummary: current.summary } : {}) };
   }), edges: [...edges.values()], notes: [...notes.values()], cardPlacements: [...cardPlacements.values()], cardBox: views?.snapshot({ live }) ?? { placements: [] }, ...(live ? { cards: cards?.list({ includeInteractiveSource: false }) ?? [] } : {}), persistence: { enabled: !!stateFile, error: saveError } });
   const flush = () => {
     clearTimeout(saveTimer);
@@ -166,7 +174,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     broadcast();
     return edge;
   };
-  const createAgent = (body, workspace = 'agents') => {
+  const createAgent = (body, workspace = 'agents', humanLayout = false) => {
     const mode = body.mode ?? 'new';
     if (!['new', 'resume'].includes(mode)) throw new Error('mode must be new or resume');
     if (!validText(body.name, 100) || !validText(body.workdir, 2048)) throw new Error('name and workdir are required');
@@ -184,7 +192,13 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       width: 440, height: 320,
     };
     if (workspace === 'card-box') Object.assign(agent, { x: 40, y: 80, width: 440, height: 420 });
-    startAgent(agent);
+    else if (hasLayout(body)) {
+      Object.assign(agent, layoutPatch(body, { width: 320, height: 240 }));
+      if (!humanLayout) canvasLayout.assertAvailable(agent);
+    }
+    if (workspace === 'agents' && hasLayout(body) && !humanLayout) quietLayoutLaunches.add(id);
+    try { startAgent(agent); }
+    catch (error) { quietLayoutLaunches.delete(id); throw error; }
     if (body.parentId) connect(body.parentId, id);
     return agent;
   };
@@ -206,7 +220,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     runs.set(id, { token: runToken, ready: false });
     activity.delete(id);
     const base = `http://127.0.0.1:${server.address()?.port || port}`;
-    const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The local canvas API is at ${base}/api. When working with Canvas agents, delegation, messages, progress notes, or card-box cards, read and follow the agent-canvas skill. The skill points to the current API guide. Relationships represent real delegation, not automatic messaging. Never modify canvas coordinates.${agent.workspace === 'card-box' ? ' You are the single Card box agent. Use the Canvas API for card operations when asked; never directly edit SQLite, Canvas JSON, backup or lock files in your workdir.' : ''}`;
+    const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The local canvas API is at ${base}/api. When working with Canvas agents, delegation, messages, progress notes, or card-box cards, read and follow the agent-canvas skill. The skill points to the current API guide. Relationships represent real delegation, not automatic messaging. You may specify or adjust positions and sizes of Agent Canvas objects through the documented API; check conflicts and human interaction locks. Card box positions and viewports remain human-only.${agent.workspace === 'card-box' ? ' You are the single Card box agent. Use the Canvas API for card operations when asked; never directly edit SQLite, Canvas JSON, backup or lock files in your workdir.' : ''}`;
     let child;
     try {
       const common = ['--tui-mode', 'regular', '--extension', join(root, 'server', 'pi-session-tracker.js'), '--skill', join(root, 'skills', 'agent-canvas', 'SKILL.md'), '--append-system-prompt', instructions];
@@ -291,6 +305,9 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     if (url.pathname.startsWith('/api/')) {
       try {
         if (closing || resetting) return reply(res, 503, { error: 'Canvas is shutting down or resetting' });
+        // Intent marker, NOT authentication: this loopback API has no auth model.
+        // Browser gestures are unrestricted; ordinary API layout writes are checked.
+        const humanLayout = req.headers['x-canvas-layout'] === 'human';
         const mediaSlot = url.pathname.match(/^\/api\/cards\/([^/]+)\/media\/(image|audio)$/);
         if (mediaSlot && req.method === 'PUT') {
           const [, id, kind] = mediaSlot;
@@ -317,6 +334,13 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Expected JSON object');
         }
         if (closing || resetting) return reply(res, 503, { error: 'Canvas is shutting down or resetting' });
+        if (url.pathname === '/api/canvas/layout' && req.method === 'GET') return reply(res, 200, canvasLayout.snapshot());
+        const interactionMatch = url.pathname.match(/^\/api\/canvas\/layout-interactions\/(agent|note|card)\/([^/]+)$/);
+        if (interactionMatch && req.method === 'POST') {
+          if (!humanLayout) return reply(res, 403, { error: 'Layout interactions are reserved for browser gestures' });
+          if (Object.keys(body).some(key => !['owner', 'action'].includes(key))) throw new Error('Invalid layout interaction fields');
+          return reply(res, 200, canvasLayout.interaction(interactionMatch[1], interactionMatch[2], body.owner, body.action));
+        }
         if (mediaSlot && req.method === 'DELETE') {
           if (Object.keys(body).some(key => key !== 'attachmentId') || typeof body.attachmentId !== 'string') throw new Error('Removal requires the current attachmentId');
           const [, id, kind] = mediaSlot;
@@ -350,7 +374,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
             for (const ws of terminals.get(agent.id) || []) ws.terminate();
             terminals.delete(agent.id); processes.delete(agent.id); runs.delete(agent.id); activity.delete(agent.id); agents.delete(agent.id);
           }
-          notes.clear(); edges.clear(); cardPlacements.clear();
+          notes.clear(); edges.clear(); cardPlacements.clear(); canvasLayout.clear(); quietLayoutLaunches.clear();
           resetting = false;
           flush(); publish();
           if (saveError) return reply(res, 500, { error: `Canvas cleared in memory but could not save reset: ${saveError}` });
@@ -412,13 +436,16 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           return reply(res, 200, { cards: matches.slice(offset, offset + limit), total: matches.length, limit, offset });
         }
         if (url.pathname === '/api/cards' && req.method === 'POST') {
-          if (Object.keys(body).some(key => !['type', 'content', 'title', 'html', 'css', 'javascript', 'tags', 'links', 'place'].includes(key))) throw new Error('Invalid card creation fields');
+          if (Object.keys(body).some(key => !['type', 'content', 'title', 'html', 'css', 'javascript', 'tags', 'links', 'place', ...LAYOUT_KEYS].includes(key))) throw new Error('Invalid card creation fields');
           if (body.place !== undefined && typeof body.place !== 'boolean') throw new Error('place must be boolean');
-          const { place, ...cardInput } = body;
+          if (body.place === false && hasLayout(body)) throw new Error('Layout fields require an Agent Canvas placement (place: true)');
+          const interactive = body.type === 'interactive';
+          const rect = { x: 0, y: 0, ...(interactive ? { width: 560, height: 420 } : { width: 340, height: 320 }), ...layoutPatch(body, { width: interactive ? 320 : 240, height: 240 }) };
+          if (hasLayout(body) && !humanLayout) canvasLayout.assertAvailable(rect);
+          const cardInput = Object.fromEntries(Object.entries(body).filter(([key]) => key !== 'place' && !LAYOUT_KEYS.includes(key)));
           const card = cards.create(cardInput);
           views.addNew(card, cards.list());
-          const size = card.type === 'interactive' ? { width: 560, height: 420 } : { width: 340, height: 320 };
-          if (body.place !== false) cardPlacements.set(card.id, { id: card.id, cardId: card.id, x: 0, y: 0, ...size });
+          if (body.place !== false) cardPlacements.set(card.id, { id: card.id, cardId: card.id, ...rect });
           broadcast(); return reply(res, 201, card);
         }
         const cardMatch = url.pathname.match(/^\/api\/cards\/([^/]+)$/);
@@ -436,14 +463,17 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
             const files = cards.get(id).type === 'interactive' ? cards.get(id).assets.map(asset => cards.interactiveAssetFile(asset.id).filename) : [];
             cards.delete(id);
             await Promise.all(files.map(filename => removeInteractiveAssetFile(mediaDirectory, filename)));
-            cardPlacements.delete(id); views.prune(cards.list()); broadcast(); return reply(res, 200, { ok: true });
+            cardPlacements.delete(id); canvasLayout.forget('card', id); views.prune(cards.list()); broadcast(); return reply(res, 200, { ok: true });
           }
         }
         const placeCard = url.pathname.match(/^\/api\/cards\/([^/]+)\/placement$/);
         if (placeCard && req.method === 'POST') {
           const card = cards.get(placeCard[1]);
-          if (Object.keys(body).length) throw new Error('Placement creation takes an empty object');
-          const placement = cardPlacements.get(card.id) || { id: card.id, cardId: card.id, x: 0, y: 0, ...(card.type === 'interactive' ? { width: 560, height: 420 } : { width: 340, height: 320 }) };
+          if (Object.keys(body).some(key => !LAYOUT_KEYS.includes(key))) throw new Error('Placement accepts only x, y, width and height');
+          const existing = cardPlacements.get(card.id);
+          if (existing && hasLayout(body)) return reply(res, 409, { error: 'Card is already placed; use PATCH to change its layout' });
+          const placement = existing || { id: card.id, cardId: card.id, x: 0, y: 0, ...(card.type === 'interactive' ? { width: 560, height: 420 } : { width: 340, height: 320 }), ...layoutPatch(body, { width: card.type === 'interactive' ? 320 : 240, height: 240 }) };
+          if (!existing && hasLayout(body) && !humanLayout) canvasLayout.assertAvailable(placement);
           cardPlacements.set(card.id, placement); broadcast(); return reply(res, 200, placement);
         }
         const placementMatch = url.pathname.match(/^\/api\/card-placements\/([^/]+)$/);
@@ -451,13 +481,14 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           const placement = cardPlacements.get(placementMatch[1]);
           if (!placement) return reply(res, 404, { error: 'Card placement not found' });
           if (req.method === 'DELETE') {
-            cardPlacements.delete(placement.id); broadcast(); return reply(res, 200, { ok: true });
+            cardPlacements.delete(placement.id); canvasLayout.forget('card', placement.id); broadcast(); return reply(res, 200, { ok: true });
           }
           const updates = {};
           for (const [key, value] of Object.entries(body)) {
             if (!validCardPlacementValue(placement.cardId, key, value)) throw new Error('Invalid placement dimensions');
             updates[key] = value;
           }
+          if (hasLayout(body) && !humanLayout) canvasLayout.assertAvailable({ ...placement, ...updates }, { kind: 'card', id: placement.id });
           Object.assign(placement, updates); broadcast(); return reply(res, 200, placement);
         }
         const sessionMatch = url.pathname.match(/^\/api\/agents\/([^/]+)\/session$/);
@@ -488,14 +519,14 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           }
           return reply(res, 200, { ok: true });
         }
-        if (url.pathname === '/api/agents' && req.method === 'POST') return reply(res, 201, createAgent(body));
+        if (url.pathname === '/api/agents' && req.method === 'POST') return reply(res, 201, createAgent(body, 'agents', humanLayout));
         if (url.pathname === '/api/messages' && req.method === 'POST') return reply(res, 202, sendMessage(body));
         const noteMatch = url.pathname.match(/^\/api\/notes\/([^/]+)$/);
         if ((url.pathname === '/api/notes' && req.method === 'POST') || (noteMatch && ['PATCH', 'DELETE'].includes(req.method))) {
           const existing = noteMatch ? notes.get(noteMatch[1]) : null;
           if (noteMatch && !existing) return reply(res, 404, { error: 'Note not found' });
           if (req.method === 'DELETE') {
-            notes.delete(existing.id); broadcast(); return reply(res, 200, { ok: true });
+            notes.delete(existing.id); canvasLayout.forget('note', existing.id); broadcast(); return reply(res, 200, { ok: true });
           }
           const updated = { ...(existing || { id: randomUUID(), title: 'Note', text: '', x: 0, y: 0, width: 280, height: 220 }) };
           if (body.title !== undefined) {
@@ -511,6 +542,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
             if (!Number.isFinite(body[key]) || (['width', 'height'].includes(key) && body[key] < 160)) throw new Error(`Invalid ${key}`);
             updated[key] = body[key];
           }
+          if (hasLayout(body) && !humanLayout) canvasLayout.assertAvailable(updated, existing ? { kind: 'note', id: existing.id } : undefined);
           notes.set(updated.id, updated); broadcast();
           return reply(res, existing ? 200 : 201, updated);
         }
@@ -548,7 +580,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
             if (agent.status !== 'stopped' || processes.has(agent.id)) {
               throw Object.assign(new Error('Stop the agent before removing it'), { status: 409 });
             }
-            agents.delete(agent.id); activity.delete(agent.id);
+            agents.delete(agent.id); quietLayoutLaunches.delete(agent.id); activity.delete(agent.id); canvasLayout.forget('agent', agent.id);
             for (const [id, edge] of edges) {
               if (edge.source === agent.id || edge.target === agent.id) edges.delete(id);
             }
@@ -569,9 +601,13 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
             }
             for (const key of ['x', 'y', 'width', 'height']) {
               if (body[key] !== undefined) {
-                if (!Number.isFinite(body[key]) || (['width', 'height'].includes(key) && body[key] < 240)) throw new Error(`Invalid ${key}`);
+                if (!Number.isFinite(body[key]) || (key === 'width' && body[key] < 320) || (key === 'height' && body[key] < 240)) throw new Error(`Invalid ${key}`);
                 updates[key] = body[key];
               }
+            }
+            if (hasLayout(body) && !humanLayout) {
+              if (agent.workspace === 'card-box') throw Object.assign(new Error('Card box layout remains human-only'), { status: 403 });
+              canvasLayout.assertAvailable({ ...agent, ...updates }, { kind: 'agent', id: agent.id });
             }
             Object.assign(agent, updates);
             broadcast(); return reply(res, 200, agent);
@@ -579,7 +615,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
         }
         return reply(res, 404, { error: 'Not found' });
       } catch (error) {
-        return reply(res, error.status || 400, { error: error.message });
+        return reply(res, error.status || 400, { error: error.message, ...(error.code?.startsWith('LAYOUT_') ? { code: error.code, ...(error.conflicts ? { conflicts: error.conflicts } : {}), ...(error.object ? { object: error.object } : {}) } : {}) });
       }
     }
     if (req.method !== 'GET') return reply(res, 405, { error: 'Method not allowed' });
