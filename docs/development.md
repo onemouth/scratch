@@ -46,9 +46,19 @@ Media checks: use isolated data. Test real file drops in both modes, image+audio
 
 Agent Canvas layout regression: verify explicit creation geometry and partial updates for agents/notes/Markdown/interactive cards, cross-kind conflicts and edge contact, negative positions, rejection without partial card/view/PTy creation or metadata edits, and unchanged no-geometry defaults. Check all three native drag/resize controls start/renew leases, block ordinary API writes while active, persist the final human write before release, and expire abandoned/multi-tab leases. Existing-object API moves and explicitly API-positioned launches must not pan/zoom or steal focus; Card Box geometry stays independent. `scripts/tests/canvas-layout-browser.mjs` runs within the isolated views fixture. Never use live Canvas data for these tests.
 
+Agent query/wait checks: use isolated fake PTYs. Verify metadata-only state/list/single-agent queries and explicit bounded ANSI output reads (including stopped agents), full card source on demand, unchanged SSE/WS replay and output persistence. Test immediate idle/stopped, unknown timeout, invalid body/timeout, missing targets, fast activity transitions, stale reports, Stop/Resume pinning, removal, independent multiple waiters, client abort and shutdown cleanup. `server/agent-queries.test.js` includes a real curl long-poll test. Do not replace the flat HTTP error format or use live agents for these tests.
+
 ## Source map
 
-- `server/index.js` — live state, auto-save/restore orchestration, validation, Pi PTYs, HTTP/SSE/WebSocket, static production assets, served API guide.
+- `server/index.js` — composition root, Canvas state, auto-save/restore, publication and shutdown orchestration.
+- `server/canvas-operations.js` — domain validation/mutations for cards, notes, views, layout, agents, delegation and messages.
+- `server/agent-runtime.js` — Pi process lifecycle, run/session/activity state, bounded output and metadata queries.
+- `server/agent-wait.js`, `server/agent-wait.test.js` — event-driven run-pinned waits and observer cleanup.
+- `server/http-routes.js` — HTTP parsing/origin/errors, media/static responses, SSE and per-request cancellation.
+- `server/terminal-transport.js` — unchanged browser terminal WS replay/input/resize.
+- `server/session-workdirs.js` — bounded saved-session header scanning.
+- `server/agent-queries.test.js` — metadata/output/wait HTTP integration and real curl regression.
+- `server/validation.js` — shared text validation helper.
 - `vite.config.js`, `server/dev-config.test.js` — strict loopback dev port, exact trusted Vite hostname and API/WS proxy configuration.
 - `server/public-origin.js`, `server/public-origin.test.js` — exact opt-in HTTPS origin validation and HTTP/WebSocket policy tests.
 - `scripts/tailscale-setup.js`, `scripts/tailscale-setup.test.js` — read-only planning, explicit Serve setup and existing-configuration safeguards.

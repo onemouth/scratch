@@ -16,7 +16,38 @@ You can use the Agent Canvas API to observe the shared canvas, create Pi agents,
 curl -fsS "$AGENT_CANVAS_URL/api/state"
 ```
 
-Returns `{ "agents": [...], "edges": [...], "notes": [...], "cards": [...], "cardPlacements": [...], "cardBox": { "epoch": "...", "revision": 0, "activeViewId": "...", "placements": [...], "views": [...] }, "persistence": { "enabled": true, "error": "" } }`. Agents have `workspace` (`agents` or `card-box`; absent on older records means `agents`), `id`, `name`, `workdir`, `task`, process `status` (`running` or `stopped`), live `activity` (`unknown`, `working`, or `idle`), `note`, recent raw terminal `output`, and layout fields. `activity` is transient and resets to `unknown` on restart until Pi reports its state; an `idle` agent is available for more work, not stopped. A live idle snapshot may also include `notificationSummary`, a short final-response preview used only for browser notifications and never persisted. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Raw output contains terminal escape codes. Node IDs can be found here; don't guess them.
+Returns `{ "agents": [...], "edges": [...], "notes": [...], "cards": [...], "cardPlacements": [...], "cardBox": { "epoch": "...", "revision": 0, "activeViewId": "...", "placements": [...], "views": [...] }, "persistence": { "enabled": true, "error": "" } }`. Agents have `workspace` (`agents` or `card-box`; absent on older records means `agents`), `id`, `name`, `workdir`, `task`, process `status` (`running`, transient `stopping`, or `stopped`), live `activity` (`unknown`, `working`, or `idle`), `note` and layout fields. This status query intentionally omits terminal `output`; read it on demand using the endpoint below. `activity` is transient and resets to `unknown` on restart until Pi reports its state; an `idle` agent is available for more work, not stopped. A live idle snapshot may also include `notificationSummary`, a short final-response preview used only for browser notifications and never persisted. Edges have `id`, `source`, `target`, `type: "delegates"`, and a human-editable `label` (default `"delegates"`). Node IDs can be found here; don't guess them.
+
+## Lightweight Agent queries, terminal output and waiting
+
+- `GET /api/agents` returns `{agents:[...]}` with metadata/status for every agent.
+- `GET /api/agents/:id` returns one agent's metadata/status, without loading the card library.
+- `GET /api/state` keeps its existing state shape, except Agent terminal output is now omitted. All three queries omit output; use the dedicated read endpoint rather than assuming output is empty. Browser SSE snapshots and terminal WebSocket replay are unchanged.
+- `GET /api/agents/:id/output` returns `{id,output,maxCharacters:80000}` for running or stopped agents. Output is the recent bounded **raw ANSI terminal tail**, not a complete conversation transcript. Truncation can start mid-escape-sequence. Reading does not clear it; Resume resets it as before. No arbitrary filesystem/transcript access is added. Missing targets return 404.
+- Collection/search/state responses still omit Interactive Card source. Read `GET /api/cards/:id` when full source is needed.
+
+```sh
+curl -fsS "$AGENT_CANVAS_URL/api/agents"
+curl -fsS "$AGENT_CANVAS_URL/api/agents/<AGENT_ID>"
+curl -fsS "$AGENT_CANVAS_URL/api/agents/<AGENT_ID>/output"
+```
+
+### Wait for the current run
+
+`POST /api/agents/:id/wait` accepts `{}` or `{"timeoutMs":60000}`. Default 60 seconds; integer range **1–600000 ms**. No other fields are accepted. It returns HTTP 200 with `{id,reason,status,activity}`:
+
+- `idle`: already idle, or a subsequent idle report. **Not proof of task success**; let the calling Agent interpret the result.
+- `stopped`: stopped/stopping, or the original process run ended/replaced. Stop/Resume does not silently switch the wait to a new process.
+- `removed`: target removed while waiting; includes last observed status/activity.
+- `timeout`: deadline reached; includes last observed status/activity. This is a normal result, not HTTP 504.
+
+Unknown activity is not idle; it keeps waiting. An initially missing target returns 404; invalid parameters return 400, using the existing flat `{error:"..."}` format. Server shutdown releases pending waits with 503 when the connection remains open. Caller disconnect cancels only that caller's wait; it does not stop or modify the target. Waits are event-driven, not repeated polling, and observe fast turn transitions independently of SSE snapshot coalescing. No request id, deduplication, automatic retries or new authentication is introduced.
+
+```sh
+curl -fsS --max-time 65 -X POST "$AGENT_CANVAS_URL/api/agents/<AGENT_ID>/wait" -H 'Content-Type: application/json' -d '{"timeoutMs":60000}'
+```
+
+Set curl and your shell tool timeout above the server deadline to receive a normal timeout result. A foreground wait occupies that shell call until it finishes. Message delivery still only acknowledges PTY submission: if waiting for a newly sent task, confirm the target started working first. Already-idle returns immediately and does not prove a newly queued message has been processed.
 
 ## Card box
 
