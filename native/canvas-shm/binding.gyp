@@ -1,7 +1,7 @@
 {
   "targets": [{
     "target_name": "canvas_shm",
-    "sources": ["canvas-shm.cc", "notify.cc"],
+    "sources": ["canvas-shm.cc", "notify.cc", "queue.cc"],
     "defines": ["NAPI_VERSION=8"],
     "cflags_cc!": ["-fno-exceptions"],
     "cflags_cc": ["-std=c++17", "-Wall", "-Wextra", "-pthread"],

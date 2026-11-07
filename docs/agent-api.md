@@ -153,7 +153,13 @@ curl -fsS -X POST "$AGENT_CANVAS_URL/api/agents" \
 
 `mode` defaults to `"new"`; for `"resume"`, omit `task`. The new Canvas node has its own ID even though its Pi session is resumed. You can include `parentId` only when this is an actual delegation.
 
-## Message an existing Pi agent
+## SHM agent-to-agent messaging
+
+When available, use `canvas_send_message({agentId,text})` rather than terminal paste/HTTP. Scratch routes your dedicated SHM outbox to the target process mailbox; native semaphores notify receivers. Default nextTurn does not wake; followUp/wake is explicit and rate/lifetime-budget limited. The tool returns queued with a message ID; `canvas_message_status({messageId})` reads later receipts without waiting. Accepted means Scratch enqueued the pinned target generation; delivered only means the receiver invoked Pi's custom-message API, not read/answered/completed. Do not automatically resend uncertain outcomes or create reply/wake loops. Maximum text is 8000 UTF-8 bytes. No HTTP fallback, persistence or restart replay. Messaging is process-scoped: reload/new/resume/fork retains channels, pending messages and receipts, then rebinds handoff to the current Pi context. No process relaunch is needed for a session change. See [full messaging contract](agent-messaging.md).
+
+## Legacy HTTP/TTY messaging
+
+This independent endpoint remains for explicitly chosen human/external-client use, not as an automatic fallback from SHM tools. It does not provide the SHM protocol's receipts or generation pinning.
 
 Use an agent **ID** from `GET /api/state` to address a running node. Include `fromId` when sending from a Canvas agent so the receiver can tell who sent it:
 
@@ -224,7 +230,7 @@ The internal `POST /api/agents/:id/session` and `POST /api/agents/:id/activity` 
 
 - `GET /api/session-workdirs` lists existing workdirs referenced by saved Pi session headers (used by the web UI's workdir dropdown; it does not read conversation content).
 - `GET /api/events` is a Server-Sent Events stream of canvas snapshots (used by the web UI).
-- `WS /api/terminal/:id` streams PTY output and accepts raw terminal input and resize messages (used by the web UI). Prefer `POST /api/messages` for explicit agent-to-agent messages.
+- `WS /api/terminal/:id` streams PTY output and accepts raw terminal input and resize messages (used by the web UI). Prefer canvas_send_message for agent-to-agent messages when available; POST /api/messages is a separately chosen legacy TTY interface.
 - `POST /api/agents/:id/stop` terminates a Pi process. `DELETE /api/agents/:id` removes a **stopped** node and its relationships from this canvas, but does not delete its saved Pi session. Don't stop or remove another agent unless explicitly asked.
 - Calls return JSON; failures return `{ "error": "..." }` with a non-2xx HTTP status. `curl -f` treats these as errors.
 - There is **no automatic message passing** and no authentication. A single local Canvas is auto-saved; restoration reopens conversations, not in-flight tasks. Use the API only against the user's configured Canvas server and record relationships only for actual work. Canvas-launched agents must keep using their supplied loopback URL.

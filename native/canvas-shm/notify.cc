@@ -19,7 +19,7 @@ extern bool args(napi_env, napi_callback_info, size_t, napi_value*);
 
 struct Signal {
   sem_t* sem = SEM_FAILED;
-  bool owner = false, cleanup = false, registered = false;
+  bool owner = false, sender = false, cleanup = false, registered = false;
   std::string name;
   napi_env env = nullptr;
   napi_threadsafe_function callback = nullptr;
@@ -75,7 +75,15 @@ napi_value SignalCreate(napi_env env, napi_callback_info info) {
   if (!args(env, info, 1, a) || !nameArg(env, a[0], name)) return nullptr;
   sem_t* sem = sem_open(name.c_str(), O_CREAT | O_EXCL, 0600, 0);
   if (sem == SEM_FAILED) return fail(env, "SHM_SIGNAL", std::string("sem_open: ") + strerror(errno));
-  auto* s = new Signal; s->sem = sem; s->name = name; s->owner = true;
+  auto* s = new Signal; s->sem = sem; s->name = name; s->owner = true; s->sender = true;
+  return signalWrap(env, s);
+}
+napi_value SignalOpen(napi_env env, napi_callback_info info) {
+  napi_value a[1]; std::string name;
+  if (!args(env, info, 1, a) || !nameArg(env, a[0], name)) return nullptr;
+  sem_t* sem = sem_open(name.c_str(), 0);
+  if (sem == SEM_FAILED) return fail(env, "SHM_SIGNAL", strerror(errno));
+  auto* s = new Signal; s->sem = sem; s->name = name; s->sender = true;
   return signalWrap(env, s);
 }
 napi_value SignalWatch(napi_env env, napi_callback_info info) {
@@ -120,7 +128,7 @@ napi_value SignalPost(napi_env env, napi_callback_info info) {
   napi_value a[1]; if (!args(env, info, 1, a)) return nullptr;
   auto* s = signalHandle(env, a[0]); if (!s) return nullptr;
   if (s->closed.load()) return fail(env, "SHM_CLOSED", "Notification handle closed");
-  if (!s->owner) return fail(env, "SHM_READ_ONLY", "Receiver cannot publish notifications");
+  if (!s->sender) return fail(env, "SHM_READ_ONLY", "Receiver cannot publish notifications");
   if (sem_post(s->sem) != 0 && errno != EOVERFLOW) return fail(env, "SHM_SIGNAL", strerror(errno));
   return a[0];
 }
@@ -139,6 +147,7 @@ napi_value SignalRemove(napi_env env, napi_callback_info info) {
 void InitNotifications(napi_env env, napi_value exports) {
   const napi_property_descriptor methods[] = {
     {"signalCreate", nullptr, SignalCreate, nullptr, nullptr, nullptr, napi_default, nullptr},
+    {"signalOpen", nullptr, SignalOpen, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"signalWatch", nullptr, SignalWatch, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"signalPost", nullptr, SignalPost, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"signalClose", nullptr, SignalClose, nullptr, nullptr, nullptr, napi_default, nullptr},

@@ -1,5 +1,7 @@
 # Canvas subscriptions and notifications
 
+Agent-to-agent message payloads use separate bounded queues and private semaphore channels, not this lossy event journal. See [messaging](agent-messaging.md).
+
 Pi agents no longer need to block on a wait request to learn about another agent. The default-on shared-memory extension provides `canvas_read`, `canvas_subscribe` and `canvas_unsubscribe`. There is **no canvas_wait tool**. The former HTTP wait endpoint has been removed and returns 404; subscription notifications replace that workflow, not mutation/terminal APIs. HTTP-only clients have no blocking wait fallback.
 
 ## Subscribe, return immediately, continue working
@@ -65,6 +67,6 @@ The existing 1 MiB snapshot capacity includes the journal; capacity/serializatio
 
 - `server/canvas-notify.test.js`: registration race, ordered fast transitions, once/cancel, filters, bounded subscriptions, explicit journal gaps, delivery policy, two independent receiver processes, native cleanup and libuv availability.
 - `npm run test:shm`: builds and requires all native snapshot/notification tests.
-- `npm run test:shm:pi`: isolated real Pi registers the production tools, reads SHM with HTTP forbidden, then receives a real semaphore-triggered idle event through a diagnostic command; no LLM call, saved session, live Canvas or persistence mutation.
+- `npm run test:shm:pi`: the isolated reader/notification stage registers production tools, reads SHM with HTTP forbidden, then receives a real semaphore-triggered idle event; no LLM call or saved session. The separate messaging stage checks process-scoped delivery across session transitions using disposable fixture sessions. Neither stage touches live Canvas or user persistence.
 
 Rebuilds and tests must run sequentially; do not rebuild the native binary while new processes are trying to load it. Existing live processes do not hot-acquire notification tools/channels. Do not restart other agents or services automatically.

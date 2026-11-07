@@ -1,6 +1,6 @@
 # Agent Canvas
 
-An auto-saved infinite canvas for live Pi Coding Agents. Each node contains a real, interactive Pi terminal; a directed connection represents **delegated work**, not automatic message passing. Agents can explicitly send messages to a running Pi node via the local API.
+An auto-saved infinite canvas for live Pi Coding Agents. Each node contains a real, interactive Pi terminal; a directed connection represents **delegated work**, not automatic message passing. Agents can explicitly send peer messages through shared memory; the local HTTP/TTY message API remains available for human/external clients.
 
 ## Quick start
 
@@ -46,9 +46,11 @@ Enabled by default on supported macOS/Linux installations. `npm run dev` and `np
 
 Agent notifications use `canvas_subscribe` / `canvas_unsubscribe`: registration returns immediately, and native semaphore wakeups deliver SHM events in the background. Default delivery is UI-only, not an LLM wake; conversation delivery is explicit. See [notification examples and limits](docs/canvas-notifications.md). There is no canvas_wait tool; the former HTTP wait endpoint has been removed (404).
 
+Agent-to-agent messaging uses `canvas_send_message` / `canvas_message_status`: per-process SHM outboxes, Scratch validation/routing, receiver mailboxes and semaphore wakeups. Both directions avoid HTTP and terminal paste. Default nextTurn does not wake; explicit followUp/wake has finite rate/lifetime budgets. Queued, accepted and delivered are distinct; delivered is only a Pi API handoff, not read/task completion. No automatic retry, persistence or restart replay. Channels, pending messages and receipt history belong to the Pi process and survive session changes/reload; delivery rebinds to the current Pi context. See [protocol and tools](docs/agent-messaging.md).
+
 ## Agent status and output
 
-Agent control remains HTTP/curl. `GET /api/agents` lists lightweight metadata, and `GET /api/agents/:id` reads one agent. These queries and `GET /api/state` omit terminal output; **`GET /api/agents/:id/output` still reads the recent raw ANSI tail** (up to 80,000 characters) when needed. Interactive source remains excluded from lists/state and is available through the full card endpoint. Browser SSE/terminal replay and saved output are unchanged.
+Agent lifecycle, layout and content control remain HTTP/curl. `GET /api/agents` lists lightweight metadata, and `GET /api/agents/:id` reads one agent. These queries and `GET /api/state` omit terminal output; **`GET /api/agents/:id/output` still reads the recent raw ANSI tail** (up to 80,000 characters) when needed. Interactive source remains excluded from lists/state and is available through the full card endpoint. Browser SSE/terminal replay and saved output are unchanged.
 
 Use shared-memory subscriptions for future events, not HTTP wait. Idle does not prove task success. HTTP-only clients retain metadata/output queries, but no blocking wait endpoint. See the [Agent API guide](docs/agent-api.md). No new error format, UDS transport or persistence migration is introduced.
 

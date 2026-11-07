@@ -215,6 +215,7 @@ napi_value Remove(napi_env env, napi_callback_info info) {
   return a[0];
 }
 extern void InitNotifications(napi_env env, napi_value exports);
+extern void InitQueues(napi_env env, napi_value exports);
 napi_value Init(napi_env env, napi_value exports) {
   const napi_property_descriptor methods[] = {
     {"create", nullptr, Create, nullptr, nullptr, nullptr, napi_default, nullptr},
@@ -227,6 +228,6 @@ napi_value Init(napi_env env, napi_value exports) {
     {"remove", nullptr, Remove, nullptr, nullptr, nullptr, napi_default, nullptr},
   };
   napi_define_properties(env, exports, sizeof(methods) / sizeof(methods[0]), methods);
-  InitNotifications(env, exports); return exports;
+  InitNotifications(env, exports); InitQueues(env, exports); return exports;
 }
 NAPI_MODULE(NODE_GYP_MODULE_NAME, Init)

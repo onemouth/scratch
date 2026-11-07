@@ -22,7 +22,7 @@ When enabled, newly launched/restored Pi processes receive:
 - `AGENT_CANVAS_SHM_NAME`: unique POSIX name for this server lifetime.
 - `AGENT_CANVAS_SHM_EPOCH`: expected server generation.
 
-The extension registers `canvas_read`, `canvas_subscribe` and `canvas_unsubscribe`. Scratch also supplies a private per-process `AGENT_CANVAS_SHM_NOTIFY` semaphore name. See [subscription delivery and limits](canvas-notifications.md). Existing processes do not magically acquire a new extension or environment; they need an explicitly requested relaunch. A standalone Pi may be launched with the extension and both values supplied by its owner. There is no discovery API in this prototype.
+The extension registers `canvas_read`, `canvas_subscribe` and `canvas_unsubscribe`. Scratch also supplies a private per-process `AGENT_CANVAS_SHM_NOTIFY` semaphore name. See [subscription delivery and limits](canvas-notifications.md). Canvas also provisions dedicated writable outboxes/ack queues and loads server/pi-canvas-messages.js; its canvas_send_message/canvas_message_status tools do not grant write access to the Canvas snapshot. See [messaging protocol and process lifecycle](agent-messaging.md). Existing processes do not magically acquire a new extension or environment; they need an explicitly requested relaunch. A standalone Pi may be launched with the extension and both values supplied by its owner. There is no discovery API in this prototype.
 
 ## Tool contract
 

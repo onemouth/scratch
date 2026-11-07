@@ -9,7 +9,7 @@ const failure = (message, status = 400) => Object.assign(new Error(message), { s
 
 // Owns process/run/activity state. Domain operations own canvas records; HTTP
 // and terminal transport never implement process/session semantics.
-export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate, getMemory = () => null, onChange = () => {} }) {
+export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate, getMemory = () => null, getMessaging = () => null, onChange = () => {} }) {
   const processes = new Map(), runs = new Map(), activity = new Map();
   const notify = onChange;
   const requireAgent = id => {
@@ -52,8 +52,11 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
       const memory = getMemory();
       const notifier = memory?.createNotifier();
       runs.get(id).notifier = notifier;
+      const messages = getMessaging()?.createChannel(id, runs.get(id).generation);
+      runs.get(id).messages = messages;
       const common = ['--tui-mode', 'regular', '--extension', join(root, 'server', 'pi-session-tracker.js'),
-        ...(memory ? ['--extension', join(root, 'server', 'pi-canvas-memory.js')] : []), '--skill', join(root, 'skills', 'agent-canvas', 'SKILL.md'), '--append-system-prompt', instructions];
+        ...(memory ? ['--extension', join(root, 'server', 'pi-canvas-memory.js')] : []),
+        ...(messages ? ['--extension', join(root, 'server', 'pi-canvas-messages.js')] : []), '--skill', join(root, 'skills', 'agent-canvas', 'SKILL.md'), '--append-system-prompt', instructions];
       const args = restoring
         ? [...(exactSession ? ['--session', agent.sessionFile] : ['--resume']), ...common]
         : mode === 'resume' ? ['--resume', ...common]
@@ -61,9 +64,11 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
       child = spawnAgent('pi', args, {
         cwd: workdir, cols: 50, rows: 16, name: 'xterm-256color',
         env: { ...process.env, TERM: 'xterm-256color', PI_IMAGE_PROTOCOL: 'none', AGENT_CANVAS_URL: base, AGENT_CANVAS_ID: id, AGENT_CANVAS_RUN: runToken,
-          AGENT_CANVAS_SHM_NAME: memory?.name ?? '', AGENT_CANVAS_SHM_EPOCH: memory?.epoch ?? '', AGENT_CANVAS_SHM_NOTIFY: runs.get(id)?.notifier?.name ?? '' },
+          AGENT_CANVAS_SHM_NAME: memory?.name ?? '', AGENT_CANVAS_SHM_EPOCH: memory?.epoch ?? '', AGENT_CANVAS_SHM_NOTIFY: runs.get(id)?.notifier?.name ?? '',
+          AGENT_CANVAS_SHM_MESSAGES: messages ? JSON.stringify(messages.config) : '' },
       });
     } catch (error) {
+      runs.get(id)?.messages?.close();
       runs.get(id)?.notifier?.close();
       runs.delete(id);
       activity.delete(id);
@@ -83,6 +88,7 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
       const wasStopping = agent.status === 'stopping';
       agent.status = 'stopped';
       notify(); // Observe the old run ending even if restore immediately replaces it.
+      run?.messages?.close();
       run?.notifier?.close();
       if (!isClosing() && !wasStopping && restoring && exactSession && !run?.ready && exitCode !== 0 && agents.has(id)) {
         try { startAgent(agent, true, true); return; }
