@@ -87,17 +87,13 @@ export function createCanvasOperations({
     return agent;
   };
 
-  return async ({ path, method, body = {}, query = new URLSearchParams(), humanLayout = false, signal }) => {
+  return async ({ path, method, body = {}, query = new URLSearchParams(), humanLayout = false }) => {
     if (isUnavailable()) return result(503, { error: 'Canvas is shutting down or resetting' });
     const cards = getCards(), views = getViews();
     const mediaSlot = path.match(new RegExp('^/api/cards/([^/]+)/media/(image|audio)$'));
     if (path === '/api/agents' && method === 'GET') return result(200, { agents: runtime.list() });
-    const agentRead = path.match(/^\/api\/agents\/([^/]+)(?:\/(output|wait))?$/);
-    if (agentRead && method === 'GET' && agentRead[2] !== 'wait') return result(200, agentRead[2] === 'output' ? runtime.read(agentRead[1]) : runtime.get(agentRead[1]));
-    if (agentRead?.[2] === 'wait' && method === 'POST') {
-      if (Object.keys(body).some(key => key !== 'timeoutMs')) throw new Error('Wait accepts only timeoutMs');
-      return result(200, await runtime.wait(agentRead[1], body.timeoutMs, signal));
-    }
+    const agentRead = path.match(/^\/api\/agents\/([^/]+)(?:\/(output))?$/);
+    if (agentRead && method === 'GET') return result(200, agentRead[2] === 'output' ? runtime.read(agentRead[1]) : runtime.get(agentRead[1]));
     if (path === '/api/canvas/layout' && method === 'GET') return result(200, canvasLayout.snapshot());
     const interactionMatch = path.match(/^\/api\/canvas\/layout-interactions\/(agent|note|card)\/([^/]+)$/);
     if (interactionMatch && method === 'POST') {

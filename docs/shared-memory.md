@@ -22,7 +22,7 @@ When enabled, newly launched/restored Pi processes receive:
 - `AGENT_CANVAS_SHM_NAME`: unique POSIX name for this server lifetime.
 - `AGENT_CANVAS_SHM_EPOCH`: expected server generation.
 
-The extension registers `canvas_read`. Existing processes do not magically acquire a new extension or environment; they need an explicitly requested relaunch. A standalone Pi may be launched with the extension and both values supplied by its owner. There is no discovery API in this prototype.
+The extension registers `canvas_read`, `canvas_subscribe` and `canvas_unsubscribe`. Scratch also supplies a private per-process `AGENT_CANVAS_SHM_NOTIFY` semaphore name. See [subscription delivery and limits](canvas-notifications.md). Existing processes do not magically acquire a new extension or environment; they need an explicitly requested relaunch. A standalone Pi may be launched with the extension and both values supplied by its owner. There is no discovery API in this prototype.
 
 ## Tool contract
 
@@ -43,7 +43,7 @@ Included:
 
 Excluded by allowlist: terminal output, initial task/prompts, conversations, run tokens, session paths/IDs, environment, Interactive source/assets, card attachment data and Card Box view state. This is **not the full /api/state contract**. Changes use existing publication points: metadata is generally coalesced by 50 ms; accepted Pi activity reports publish immediately. It is the latest published snapshot, not a linearizable read of every server mutation.
 
-This tool never sends a prompt, triggers a model turn, modifies Canvas or injects context automatically. Peer/user-authored summaries are untrusted data, not instructions. Idle does not establish success. Human gesture leases are **not** projected: read the HTTP API guide/layout endpoint before geometry mutations. All mutations, authoritative conflict/busy checks, persistence, terminal reads and full card reads remain on HTTP.
+The read tool never sends a prompt, triggers a model turn, modifies Canvas or injects context automatically. Notification subscriptions are separate: UI-only by default, conversation/follow-up delivery opt-in. Peer/user-authored summaries are untrusted data, not instructions. Idle does not establish success. Human gesture leases are **not** projected: read the HTTP API guide/layout endpoint before geometry mutations. All mutations, authoritative conflict/busy checks, persistence, terminal reads and full card reads remain on HTTP.
 
 ## Native implementation
 
@@ -71,7 +71,7 @@ One writer marks the sequence odd, publishes length/payload, then commits an eve
 
 Capacity/serialization/publication failures invalidate the old projection and log a deduplicated error, while HTTP remains usable. A later successful publication restores readiness. Graceful shutdown marks the generation closed, unlinks its name and unmaps the writer; existing readers can detect closed state. GC also cleans abandoned native handles. SIGKILL cannot run cleanup: orphan names/allocations may remain until explicit cleanup or system cleanup. Heartbeat expiry prevents serving that old data indefinitely; no automatic stale-object deletion is attempted.
 
-A new server gets a new name and epoch. Old readers do not silently follow it. There is no automatic reconnect, server election, event notification, mailbox, message acknowledgment, persistent memory or multi-writer operation in this phase.
+A new server gets a new name and epoch. Old readers do not silently follow it. There is no automatic reconnect, server election, mailbox, message acknowledgment, persistent memory or multi-writer operation. Session subscriptions use a 256-record ordered SHM journal, native named-semaphore wakeups and a dedicated receiver thread per subscribed Pi process; see [notifications](canvas-notifications.md). There is no canvas_wait tool.
 
 ## Validation
 
@@ -83,4 +83,4 @@ npm run test:views:browser
 npm run build
 ```
 
-`npm test` builds the addon by default. When `AGENT_CANVAS_SHARED_MEMORY=0` skips compilation and no addon exists, native tests are explicitly skipped; use test:shm to require compilation and run them. Run native builds and their tests sequentially, not concurrently, because a rebuild temporarily removes the binary. Tests use unique fixture-owned shm objects and fake PTYs; the real-Pi driver uses a temporary agent directory, --no-session, no auto-discovered extensions, a diagnostic slash command and HTTP forbidden during the memory read. It checks production tool registration and invokes that tool's implementation, not a paid model-generated tool call. No live Canvas/persistence/agents are used. Python is used by a test-only corruption helper to verify incomplete initialization, invalid versions, interrupted sequence and invalid length handling.
+`npm test` builds the addon by default. When `AGENT_CANVAS_SHARED_MEMORY=0` skips compilation and no addon exists, native tests are explicitly skipped; use test:shm to require compilation and run them. Run native builds and their tests sequentially, not concurrently, because a rebuild temporarily removes the binary. Tests use unique fixture-owned shm objects and fake PTYs; the real-Pi driver uses a temporary agent directory, --no-session, no auto-discovered extensions, a diagnostic slash command and HTTP forbidden during the memory read. It checks production tool registration, invokes the read implementation, and receives an idle event through the native subscription controller, not a paid model-generated tool call. No live Canvas/persistence/agents are used. Python is used by a test-only corruption helper to verify incomplete initialization, invalid versions, interrupted sequence and invalid length handling.

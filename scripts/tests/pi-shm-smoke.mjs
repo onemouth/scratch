@@ -8,8 +8,10 @@ import { once } from 'node:events';
 import { createCanvasMemory } from '../../server/canvas-memory.js';
 
 const directory = await mkdtemp(join(tmpdir(), 'canvas-memory-pi-'));
-const publisher = createCanvasMemory({ getState: () => ({ agents: [{ id: 'isolated-fixture', name: 'Memory fixture', activity: 'idle' }],
-  edges: [], notes: [], cards: [], cardPlacements: [] }) });
+const state = { agents: [{ id: 'isolated-fixture', name: 'Memory fixture', status: 'running', activity: 'working', processGeneration: 'fixture-generation' }],
+  edges: [], notes: [], cards: [], cardPlacements: [] };
+const publisher = createCanvasMemory({ getState: () => state });
+const notifier = publisher.createNotifier();
 let child, timeout, stderr = '';
 try {
   child = spawn('pi', ['--mode', 'rpc', '--no-session', '--no-extensions', '--no-skills', '--no-prompt-templates',
@@ -17,15 +19,15 @@ try {
     '--extension', fileURLToPath(new URL('./pi-shm-extension.js', import.meta.url))], {
     cwd: directory,
     env: { ...process.env, PI_CODING_AGENT_DIR: directory, AGENT_CANVAS_URL: '', AGENT_CANVAS_ID: '', AGENT_CANVAS_RUN: '',
-      AGENT_CANVAS_SHM_NAME: publisher.name, AGENT_CANVAS_SHM_EPOCH: publisher.epoch },
+      AGENT_CANVAS_SHM_NAME: publisher.name, AGENT_CANVAS_SHM_EPOCH: publisher.epoch, AGENT_CANVAS_SHM_NOTIFY: notifier.name },
     stdio: ['pipe', 'pipe', 'pipe'],
   });
   child.stderr.on('data', data => { stderr += data; });
   await new Promise((resolve, reject) => {
-    let buffer = '', read = false, handled = false;
+    let buffer = '', read = false, handled = false, notified = false, notifyHandled = false, sentSubscribe = false;
     timeout = setTimeout(() => reject(new Error(`Pi smoke timed out: ${stderr}`)), 15000);
     child.once('error', reject);
-    child.once('exit', (code, signal) => { if (!read || !handled) reject(new Error(`Pi exited early (${code}/${signal}): ${stderr}`)); });
+    child.once('exit', (code, signal) => { if (!read || !handled || !notified || !notifyHandled) reject(new Error(`Pi exited early (${code}/${signal}): ${stderr}`)); });
     child.stdout.setEncoding('utf8');
     child.stdout.on('data', data => {
       buffer += data;
@@ -48,7 +50,23 @@ try {
             assert.equal(event.success, true, event.error);
             assert.equal(event.data.disposition, 'handled'); handled = true;
           }
-          if (read && handled) resolve();
+          if (event.type === 'extension_ui_request' && event.message === 'SHM_SUBSCRIBED') {
+            state.agents[0] = { ...state.agents[0], activity: 'idle' }; publisher.observeAgents();
+          }
+          if (event.type === 'extension_ui_request' && event.message?.startsWith('SHM_NOTIFY:')) {
+            const notification = JSON.parse(event.message.slice('SHM_NOTIFY:'.length));
+            assert.equal(notification.type, 'idle'); assert.equal(notification.agentId, 'isolated-fixture');
+            notified = true;
+          }
+          if (event.type === 'extension_ui_request' && event.message?.startsWith('SHM_NOTIFY_ERROR:')) throw new Error(event.message);
+          if (event.type === 'response' && event.id === 'notify') {
+            assert.equal(event.success, true, event.error); assert.equal(event.data.disposition, 'handled'); notifyHandled = true;
+          }
+          if (read && handled && !sentSubscribe) {
+            sentSubscribe = true;
+            child.stdin.write(JSON.stringify({ id: 'notify', type: 'prompt', message: '/notify-smoke' }) + '\n');
+          }
+          if (read && handled && notified && notifyHandled) resolve();
         } catch (error) { reject(error); }
       }
     });
@@ -58,7 +76,7 @@ try {
   const exit = once(child, 'exit'); child.stdin.end();
   timeout = setTimeout(() => child.kill('SIGKILL'), 3000);
   await exit;
-  console.log('Real Pi loaded canvas_read; its implementation read the shared snapshot with HTTP forbidden. No LLM run or saved session.');
+  console.log('Real Pi loaded Canvas tools, read SHM with HTTP forbidden, and received an idle event via semaphore notification. No LLM run or saved session.');
 } finally {
   clearTimeout(timeout);
   if (child && child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');

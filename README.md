@@ -44,11 +44,13 @@ The script finds `tailscale` on PATH or the bundled macOS CLI at `/Applications/
 
 Enabled by default on supported macOS/Linux installations. `npm run dev` and `npm start` build the native addon automatically before starting; set `AGENT_CANVAS_SHARED_MEMORY=0` for HTTP-only startup without compilation. Scratch publishes a read-only POSIX shared-memory projection; newly launched/restored Pi agents receive a `canvas_read` tool that reads summaries without HTTP. No ordinary state file mapping, Pi fork, automatic messaging or replacement of the HTTP control API. See [setup, lifecycle and limitations](docs/shared-memory.md). Do not restart live agents automatically.
 
-## Agent status, output and waiting
+Agent notifications use `canvas_subscribe` / `canvas_unsubscribe`: registration returns immediately, and native semaphore wakeups deliver SHM events in the background. Default delivery is UI-only, not an LLM wake; conversation delivery is explicit. See [notification examples and limits](docs/canvas-notifications.md). There is no canvas_wait tool; the former HTTP wait endpoint has been removed (404).
+
+## Agent status and output
 
 Agent control remains HTTP/curl. `GET /api/agents` lists lightweight metadata, and `GET /api/agents/:id` reads one agent. These queries and `GET /api/state` omit terminal output; **`GET /api/agents/:id/output` still reads the recent raw ANSI tail** (up to 80,000 characters) when needed. Interactive source remains excluded from lists/state and is available through the full card endpoint. Browser SSE/terminal replay and saved output are unchanged.
 
-`POST /api/agents/:id/wait` with `{}` or `{"timeoutMs":60000}` waits for `idle`, `stopped`, `removed` or `timeout`. Default 60 seconds, maximum 10 minutes; already-idle returns immediately, unknown keeps waiting, and Stop/Resume does not switch the wait to the replacement process. Idle does not prove task success or processing of a newly submitted message. Client disconnect/timeout never stops the target. Use a curl/shell timeout longer than the requested wait. See the [Agent API guide](docs/agent-api.md) for examples. No new error format, schema, UDS transport or persistence migration is introduced.
+Use shared-memory subscriptions for future events, not HTTP wait. Idle does not prove task success. HTTP-only clients retain metadata/output queries, but no blocking wait endpoint. See the [Agent API guide](docs/agent-api.md). No new error format, UDS transport or persistence migration is introduced.
 
 ## Agent-controlled layout
 

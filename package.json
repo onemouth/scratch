@@ -11,7 +11,7 @@
     "dev": "concurrently -k \"node server/index.js\" \"vite --host 127.0.0.1\"",
     "build": "vite build",
     "build:shm": "node scripts/build-shm.js",
-    "test:shm": "npm run build:shm && node --test shared/canvas-memory.test.js server/canvas-memory.test.js",
+    "test:shm": "npm run build:shm && node --test shared/canvas-memory.test.js server/canvas-memory.test.js server/canvas-notify.test.js",
     "test:shm:pi": "npm run build:shm && node scripts/tests/pi-shm-smoke.mjs",
     "start": "node server/index.js",
     "tailscale:setup": "node scripts/tailscale-setup.js",

@@ -5,11 +5,6 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createApp } from './index.js';
 
-const delay = ms => new Promise(resolve => setTimeout(resolve, ms));
-async function until(check) {
-  for (let i = 0; i < 200; i++) { if (check()) return; await delay(5); }
-  assert.fail('Timed out waiting for fixture state');
-}
 async function fixture() {
   const children = [];
   const app = createApp({ port: 0, spawnAgent: (_bin, args, options) => {
@@ -25,9 +20,7 @@ async function fixture() {
     return { status: res.status, body: await res.json() };
   };
   const agent = (await request('/agents', 'POST', { name: 'Query fixture', workdir: process.cwd() })).body;
-  const report = (state, seq, runToken = children.at(-1).options.env.AGENT_CANVAS_RUN) => request(`/agents/${agent.id}/activity`, 'POST', { runToken, state, seq });
-  const wait = (body = {}, options) => request(`/agents/${agent.id}/wait`, 'POST', body, options);
-  return { app, children, agent, base, request, report, wait };
+  return { app, children, agent, base, request };
 }
 
 test('HTTP metadata queries omit terminal output and interactive source; dedicated reads retain the bounded ANSI tail', async () => {
@@ -65,85 +58,57 @@ test('HTTP metadata queries omit terminal output and interactive source; dedicat
   } finally { await app.close(); }
 });
 
-test('HTTP waits return idle immediately, wait through unknown, validate input and preserve flat error responses', async () => {
-  const { app, agent, request, report, wait } = await fixture();
+test('removed HTTP wait routes return 404 without changing agents, including HTTP-only mode', async () => {
+  const { app, agent, request } = await fixture();
   try {
-    const timeout = await wait({ timeoutMs: 10 });
-    assert.equal(timeout.status, 200);
-    assert.deepEqual(timeout.body, { id: agent.id, reason: 'timeout', status: 'running', activity: 'unknown' });
-    for (const timeoutMs of [0, -1, 1.5, '10', null, 600001]) assert.equal((await wait({ timeoutMs })).status, 400);
-    assert.equal((await wait({ extra: true })).status, 400);
-    assert.equal((await request('/agents/missing/wait', 'POST', {})).status, 404);
-    await report('idle', 1);
-    assert.deepEqual((await wait()).body, { id: agent.id, reason: 'idle', status: 'running', activity: 'idle' });
-    const denied = await wait({}, { headers: { Origin: 'https://untrusted.example' } });
-    assert.equal(denied.status, 403); assert.equal(typeof denied.body.error, 'string');
-    assert.equal(app.runtime.waiterCount, 0);
+    for (const method of ['POST', 'GET']) {
+      for (const id of [agent.id, 'missing']) {
+        const response = await request(`/agents/${id}/wait`, method, method === 'POST' ? { timeoutMs: 600000 } : undefined);
+        assert.equal(response.status, 404);
+        assert.equal(typeof response.body.error, 'string');
+      }
+    }
+    assert.equal((await request(`/agents/${agent.id}`)).body.status, 'running');
+    assert.equal('wait' in app.runtime, false);
+    assert.equal('waiterCount' in app.runtime, false);
+    const denied = await request(`/agents/${agent.id}/wait`, 'POST', {}, { headers: { Origin: 'https://untrusted.example' } });
+    assert.equal(denied.status, 403);
   } finally { await app.close(); }
+  const httpOnly = createApp({ port: 0, sharedMemory: false });
+  try {
+    await httpOnly.listen();
+    const response = await fetch(`http://127.0.0.1:${httpOnly.server.address().port}/api/agents/missing/wait`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
+    });
+    assert.equal(response.status, 404);
+  } finally { await httpOnly.close(); }
 });
 
-test('HTTP waits observe fast turns and ignore stale activity independently of SSE coalescing', async () => {
-  const { app, report, wait } = await fixture();
-  try {
-    await report('working', 1);
-    const first = wait(); await until(() => app.runtime.waiterCount === 1);
-    await report('idle', 2); await report('working', 3);
-    assert.equal((await first).body.reason, 'idle');
-    const second = wait(); await until(() => app.runtime.waiterCount === 1);
-    await report('idle', 2); assert.equal(app.runtime.waiterCount, 1);
-    await report('idle', 4); assert.equal((await second).body.reason, 'idle');
-    assert.equal(app.runtime.waiterCount, 0);
-  } finally { await app.close(); }
-});
-
-test('HTTP wait pins the old run through Stop/Resume; timeout and disconnect never stop the target', async () => {
-  const { app, children, agent, request, report, wait } = await fixture();
+test('activity reports still reject stale sequences and replaced process tokens without HTTP wait', async () => {
+  const { app, children, agent, request } = await fixture();
   try {
     const oldToken = children[0].options.env.AGENT_CANVAS_RUN;
-    await report('working', 1);
-    const pending = wait(); await until(() => app.runtime.waiterCount === 1);
+    const report = (state, seq, runToken = oldToken) => request(`/agents/${agent.id}/activity`, 'POST', { runToken, state, seq });
+    await report('working', 10); await report('idle', 9);
+    assert.equal((await request(`/agents/${agent.id}`)).body.activity, 'working');
+    await report('idle', 11); await report('working', 10);
+    assert.equal((await request(`/agents/${agent.id}`)).body.activity, 'idle');
     await request(`/agents/${agent.id}/stop`, 'POST', {});
     await request(`/agents/${agent.id}/resume`, 'POST', {});
-    assert.equal((await pending).body.reason, 'stopped');
-    assert.equal((await report('idle', 2, oldToken)).status, 409);
-    assert.equal((await wait({ timeoutMs: 10 })).body.activity, 'unknown');
-    const controller = new AbortController();
-    const disconnected = wait({}, { signal: controller.signal });
-    await until(() => app.runtime.waiterCount === 1); controller.abort();
-    await assert.rejects(disconnected, { name: 'AbortError' });
-    await until(() => app.runtime.waiterCount === 0);
-    assert.equal((await request(`/agents/${agent.id}`)).body.status, 'running');
-    await request(`/agents/${agent.id}/stop`, 'POST', {});
-    assert.equal((await wait()).body.reason, 'stopped');
+    assert.equal((await report('idle', 12)).status, 409);
+    assert.equal((await request(`/agents/${agent.id}`)).body.activity, 'unknown');
+    assert.equal((await report('working', 1, children[1].options.env.AGENT_CANVAS_RUN)).status, 200);
+    assert.equal((await request(`/agents/${agent.id}`)).body.activity, 'working');
   } finally { await app.close(); }
 });
 
-test('multiple HTTP callers wait independently; server shutdown releases pending waits', async () => {
-  const { app, report, wait } = await fixture();
+test('actual curl receives 404 for removed wait instead of opening a long poll', async () => {
+  const { app, agent, base } = await fixture();
   try {
-    await report('working', 1);
-    const controller = new AbortController();
-    const canceled = wait({}, { signal: controller.signal }), one = wait(), two = wait();
-    await until(() => app.runtime.waiterCount === 3); controller.abort();
-    await assert.rejects(canceled, { name: 'AbortError' });
-    await until(() => app.runtime.waiterCount === 2);
-    await report('idle', 2);
-    assert.equal((await one).body.reason, 'idle'); assert.equal((await two).body.reason, 'idle');
-    await report('working', 3);
-    const pending = wait(); await until(() => app.runtime.waiterCount === 1);
-    const closing = app.close();
-    const res = await pending; assert.equal(res.status, 503); assert.equal(typeof res.body.error, 'string');
-    await closing; assert.equal(app.runtime.waiterCount, 0);
-  } finally { await app.close(); }
-});
-
-test('actual curl can wait for a turn without special EOF handling', async () => {
-  const { app, agent, base, report } = await fixture();
-  try {
-    await report('working', 1);
-    const curl = promisify(execFile)('curl', ['-fsS', '--max-time', '3', '-X', 'POST', `${base}/agents/${agent.id}/wait`, '-H', 'Content-Type: application/json', '-d', '{"timeoutMs":2000}']);
-    await until(() => app.runtime.waiterCount === 1);
-    await report('idle', 2);
-    assert.equal(JSON.parse((await curl).stdout).reason, 'idle');
+    const { stdout } = await promisify(execFile)('curl', ['-sS', '--max-time', '3', '-w', '\\n%{http_code}', '-X', 'POST',
+      `${base}/agents/${agent.id}/wait`, '-H', 'Content-Type: application/json', '-d', '{"timeoutMs":600000}']);
+    const newline = stdout.lastIndexOf('\n');
+    assert.equal(stdout.slice(newline + 1), '404');
+    assert.equal(typeof JSON.parse(stdout.slice(0, newline)).error, 'string');
   } finally { await app.close(); }
 });

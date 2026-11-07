@@ -46,13 +46,14 @@ Media checks: use isolated data. Test real file drops in both modes, image+audio
 
 Agent Canvas layout regression: verify explicit creation geometry and partial updates for agents/notes/Markdown/interactive cards, cross-kind conflicts and edge contact, negative positions, rejection without partial card/view/PTy creation or metadata edits, and unchanged no-geometry defaults. Check all three native drag/resize controls start/renew leases, block ordinary API writes while active, persist the final human write before release, and expire abandoned/multi-tab leases. Existing-object API moves and explicitly API-positioned launches must not pan/zoom or steal focus; Card Box geometry stays independent. `scripts/tests/canvas-layout-browser.mjs` runs within the isolated views fixture. Never use live Canvas data for these tests.
 
-Agent query/wait checks: use isolated fake PTYs. Verify metadata-only state/list/single-agent queries and explicit bounded ANSI output reads (including stopped agents), full card source on demand, unchanged SSE/WS replay and output persistence. Test immediate idle/stopped, unknown timeout, invalid body/timeout, missing targets, fast activity transitions, stale reports, Stop/Resume pinning, removal, independent multiple waiters, client abort and shutdown cleanup. `server/agent-queries.test.js` includes a real curl long-poll test. Do not replace the flat HTTP error format or use live agents for these tests.
+Agent query checks: use isolated fake PTYs. Verify metadata-only state/list/single-agent queries and bounded ANSI output reads (including stopped agents), full card source on demand, unchanged SSE/WS replay and output persistence. The removed HTTP wait route must return 404 for existing/missing agents in both normal and HTTP-only modes without modifying the target. server/agent-queries.test.js includes an actual curl removal regression. Preserve flat HTTP errors; use notification tests for event delivery, fast transitions and generation handling.
 
 Shared-memory prototype: `npm run test:shm` compiles the optional POSIX addon and requires its tests to run. `npm run test:shm:pi` uses the installed Pi CLI in an isolated temporary directory, confirms production tool registration and invokes its reader implementation without an LLM call or HTTP. Test writers/readers/corruption helpers own unique shm names only. Never inspect/delete unknown shared-memory objects or use live agents for cleanup tests. See [shared-memory setup](shared-memory.md). npm dev/start/test lifecycle hooks build the addon by default; `AGENT_CANVAS_SHARED_MEMORY=0` skips that build and defaults the server to HTTP-only. Native cases are explicitly skipped if unbuilt, and test:shm always requires compilation. Do not run a rebuild concurrently with native readers/tests. No runtime fallback pretends memory is shared.
 
 ## Source map
 
-- `native/canvas-shm/` — owned Node-API POSIX snapshot binding and upstream MIT notice.
+- `native/canvas-shm/` — owned Node-API POSIX snapshot/semaphore bindings and upstream MIT notice.
+- `server/canvas-notify.js`, `server/canvas-notify.test.js` — session subscriptions, ordered delivery, gap detection and independent-process notification tests.
 - `server/canvas-memory.js`, `shared/canvas-memory.js` — projection publication, protocol validation and bounded pages.
 - `server/pi-canvas-memory.js` — optional read-only Pi tool, no auto-context or message delivery.
 - `scripts/build-shm.js`, `scripts/tests/*shm*` — local build and isolated native/real-Pi fixtures.
@@ -60,11 +61,10 @@ Shared-memory prototype: `npm run test:shm` compiles the optional POSIX addon an
 - `server/index.js` — composition root, Canvas state, auto-save/restore, publication and shutdown orchestration.
 - `server/canvas-operations.js` — domain validation/mutations for cards, notes, views, layout, agents, delegation and messages.
 - `server/agent-runtime.js` — Pi process lifecycle, run/session/activity state, bounded output and metadata queries.
-- `server/agent-wait.js`, `server/agent-wait.test.js` — event-driven run-pinned waits and observer cleanup.
-- `server/http-routes.js` — HTTP parsing/origin/errors, media/static responses, SSE and per-request cancellation.
+- `server/http-routes.js` — HTTP parsing/origin/errors, media/static responses, SSE.
 - `server/terminal-transport.js` — unchanged browser terminal WS replay/input/resize.
 - `server/session-workdirs.js` — bounded saved-session header scanning.
-- `server/agent-queries.test.js` — metadata/output/wait HTTP integration and real curl regression.
+- `server/agent-queries.test.js` — metadata/output/activity HTTP integration and removed-wait curl regression.
 - `server/validation.js` — shared text validation helper.
 - `vite.config.js`, `server/dev-config.test.js` — strict loopback dev port, exact trusted Vite hostname and API/WS proxy configuration.
 - `server/public-origin.js`, `server/public-origin.test.js` — exact opt-in HTTPS origin validation and HTTP/WebSocket policy tests.

@@ -3,16 +3,15 @@ import { existsSync, statSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { WebSocket } from 'ws';
 import { validText } from './validation.js';
-import { waitForAgent } from './agent-wait.js';
 
 export const MAX_OUTPUT = 80000;
 const failure = (message, status = 400) => Object.assign(new Error(message), { status });
 
 // Owns process/run/activity state. Domain operations own canvas records; HTTP
-// and terminal transport never implement process/session/wait semantics.
-export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate, getMemory = () => null }) {
-  const processes = new Map(), runs = new Map(), activity = new Map(), listeners = new Set();
-  const notify = () => { for (const listener of listeners) listener(); };
+// and terminal transport never implement process/session semantics.
+export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate, getMemory = () => null, onChange = () => {} }) {
+  const processes = new Map(), runs = new Map(), activity = new Map();
+  const notify = onChange;
   const requireAgent = id => {
     const agent = agents.get(id);
     if (!agent) throw failure('Agent not found', 404);
@@ -21,7 +20,7 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
   const describe = (agent, { includeOutput = false } = {}) => {
     const { output: _output, ...metadata } = agent;
     const current = activity.get(agent.id);
-    return { ...metadata, ...(includeOutput ? { output: agent.output } : {}), activity: current?.state ?? 'unknown', ...(current?.summary ? { notificationSummary: current.summary } : {}) };
+    return { ...metadata, ...(includeOutput ? { output: agent.output } : {}), processGeneration: runs.get(agent.id)?.generation ?? null, activity: current?.state ?? 'unknown', ...(current?.summary ? { notificationSummary: current.summary } : {}) };
   };
   const output = (agent, text) => {
     agent.output = (agent.output + text).slice(-MAX_OUTPUT);
@@ -44,13 +43,15 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
     agent.status = 'running';
     agent.output = '';
     const runToken = randomUUID();
-    runs.set(id, { token: runToken, ready: false });
+    runs.set(id, { token: runToken, generation: randomUUID(), ready: false });
     activity.delete(id);
     const base = getBaseUrl();
     const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The local canvas API is at ${base}/api. When working with Canvas agents, delegation, messages, progress notes, or card-box cards, read and follow the agent-canvas skill. The skill points to the current API guide. Relationships represent real delegation, not automatic messaging. You may specify or adjust positions and sizes of Agent Canvas objects through the documented API; check conflicts and human interaction locks. Card box positions and viewports remain human-only.${agent.workspace === 'card-box' ? ' You are the single Card box agent. Use the Canvas API for card operations when asked; never directly edit SQLite, Canvas JSON, backup or lock files in your workdir.' : ''}`;
     let child;
     try {
       const memory = getMemory();
+      const notifier = memory?.createNotifier();
+      runs.get(id).notifier = notifier;
       const common = ['--tui-mode', 'regular', '--extension', join(root, 'server', 'pi-session-tracker.js'),
         ...(memory ? ['--extension', join(root, 'server', 'pi-canvas-memory.js')] : []), '--skill', join(root, 'skills', 'agent-canvas', 'SKILL.md'), '--append-system-prompt', instructions];
       const args = restoring
@@ -60,9 +61,10 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
       child = spawnAgent('pi', args, {
         cwd: workdir, cols: 50, rows: 16, name: 'xterm-256color',
         env: { ...process.env, TERM: 'xterm-256color', PI_IMAGE_PROTOCOL: 'none', AGENT_CANVAS_URL: base, AGENT_CANVAS_ID: id, AGENT_CANVAS_RUN: runToken,
-          AGENT_CANVAS_SHM_NAME: memory?.name ?? '', AGENT_CANVAS_SHM_EPOCH: memory?.epoch ?? '' },
+          AGENT_CANVAS_SHM_NAME: memory?.name ?? '', AGENT_CANVAS_SHM_EPOCH: memory?.epoch ?? '', AGENT_CANVAS_SHM_NOTIFY: runs.get(id)?.notifier?.name ?? '' },
       });
     } catch (error) {
+      runs.get(id)?.notifier?.close();
       runs.delete(id);
       activity.delete(id);
       agent.status = 'stopped';
@@ -81,6 +83,7 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
       const wasStopping = agent.status === 'stopping';
       agent.status = 'stopped';
       notify(); // Observe the old run ending even if restore immediately replaces it.
+      run?.notifier?.close();
       if (!isClosing() && !wasStopping && restoring && exactSession && !run?.ready && exitCode !== 0 && agents.has(id)) {
         try { startAgent(agent, true, true); return; }
         catch (error) { agent.restoreWarning = error.message; }
@@ -138,11 +141,5 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
       if (processes.has(id)) { agent.status = 'stopping'; processes.get(id).kill(); }
       broadcast(); return { ok: true };
     },
-    wait: (id, timeoutMs, signal) => waitForAgent({ id, timeoutMs }, {
-      getAgent: id => agents.has(id) ? describe(agents.get(id)) : null,
-      getRun: id => runs.get(id), signal, isClosing,
-      subscribe: listener => { listeners.add(listener); return () => listeners.delete(listener); },
-    }),
-    get waiterCount() { return listeners.size; },
   };
 }

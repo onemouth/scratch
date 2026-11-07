@@ -124,11 +124,11 @@ test('extension registers without acquiring resources, tool closes readers, vali
     const missing = canvasReadTool({ name: 'x', epoch: 'one', open: () => { throw Object.assign(new Error('Gone'), { code: 'SHM_MISSING' }); } });
     assert.equal((await missing.execute('x', {})).details.code, 'SHM_MISSING');
     const keys = ['AGENT_CANVAS_SHM_NAME', 'AGENT_CANVAS_SHM_EPOCH'];
-    const previous = keys.map(key => process.env[key]); let registered;
+    const previous = keys.map(key => process.env[key]); const registered = [];
     try {
       process.env[keys[0]] = '/scsh-test'; process.env[keys[1]] = 'one';
-      canvasMemoryExtension({ registerTool: value => { registered = value; } });
-      assert.equal(registered.name, 'canvas_read');
+      canvasMemoryExtension({ registerTool: value => registered.push(value), on() {} });
+      assert.deepEqual(registered.map(tool => tool.name), ['canvas_read', 'canvas_subscribe', 'canvas_unsubscribe']);
     } finally { keys.forEach((key, i) => { if (previous[i] === undefined) delete process.env[key]; else process.env[key] = previous[i]; }); }
   } finally { globalThis.fetch = originalFetch; }
 });

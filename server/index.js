@@ -93,6 +93,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     getBaseUrl: () => `http://127.0.0.1:${server.address()?.port || port}`,
     isClosing: () => closing,
     getMemory: () => memory,
+    onChange: () => memory?.observeAgents(),
   });
   const { startAgent, stopProcesses } = runtime;
   const operate = createCanvasOperations({
@@ -138,6 +139,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
         views = new CardViews(saved?.cardBox, cards.list());
         if (sharedMemory) memory = createCanvasMemory({
           ...(typeof sharedMemory === 'object' ? sharedMemory : {}),
+          getAgents: () => runtime.list(),
           getState: () => ({ agents: runtime.list(), edges: [...edges.values()], notes: [...notes.values()],
             cards: cards.list({ includeInteractiveSource: false }), cardPlacements: [...cardPlacements.values()] }),
         });
@@ -156,7 +158,6 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       flush(); // Save running intent BEFORE shutdown kills change process status.
       closing = true;
       memory?.close();
-      runtime.notify();
       closePromise = (async () => {
         for (const client of clients) client.end();
         for (const group of terminals.values()) for (const ws of group) ws.terminate();

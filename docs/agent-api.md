@@ -24,6 +24,12 @@ If this Pi process offers `canvas_read`, it can read paginated Canvas summaries 
 
 This experimental feature is enabled by default, requires a locally built native addon (npm startup commands build it automatically), and is passed to new/restored Pi processes. Set `AGENT_CANVAS_SHARED_MEMORY=0` to disable it and skip startup compilation. Missing/stale/busy/incompatible memory returns an explicit tool error, never an implicit HTTP fallback. Keep using HTTP for this complete guide, mutations, authoritative layout/busy validation, terminal output and full card reads. Do not enable/restart services or relaunch other agents without permission. See [shared-memory setup and limits](shared-memory.md).
 
+### Subscribe instead of waiting
+
+If canvas_subscribe is available, register future Agent events and continue working: `{agentId,events?:["started"|"working"|"idle"|"stopped"|"removed"|"progress"],delivery?:"notification"|"nextTurn"|"followUp",wake?:false,once?:false,generation?:"..."}`. Defaults are idle/stopped/removed events and UI-only notification, without a model call. nextTurn queues context without waking; followUp requires once:true, cannot target yourself and may queue another model continuation; wake:true additionally permits starting an idle model and is only accepted with followUp. Do not create automatic wake cycles. Idle is not success. The target must exist; already-idle does not fabricate an event. Registration returns subscriptionId, serverEpoch, cursor, active and explicit scope (logical agent ID across restarts unless generation-filtered). At most 32 subscriptions per Pi session; not persisted across reload/shutdown. `canvas_unsubscribe({subscriptionId})` cancels one, or use `"*"` to cancel all in this session. No other Agent is stopped or changed.
+
+Named-semaphore wakeups cause the extension to read the 256-record SHM journal, preserving fast transitions independently of browser snapshot coalescing. Missing/stale memory, journal overrun and excessive notification bursts are explicit errors; do not infer an outcome. This phase notifies Agent lifecycle/activity/progress, not arbitrary card/layout changes. See [complete notification semantics](canvas-notifications.md). There is no canvas_wait tool.
+
 ## Lightweight Agent queries, terminal output and waiting
 
 - `GET /api/agents` returns `{agents:[...]}` with metadata/status for every agent.
@@ -38,22 +44,9 @@ curl -fsS "$AGENT_CANVAS_URL/api/agents/<AGENT_ID>"
 curl -fsS "$AGENT_CANVAS_URL/api/agents/<AGENT_ID>/output"
 ```
 
-### Wait for the current run
+### Removed HTTP wait
 
-`POST /api/agents/:id/wait` accepts `{}` or `{"timeoutMs":60000}`. Default 60 seconds; integer range **1–600000 ms**. No other fields are accepted. It returns HTTP 200 with `{id,reason,status,activity}`:
-
-- `idle`: already idle, or a subsequent idle report. **Not proof of task success**; let the calling Agent interpret the result.
-- `stopped`: stopped/stopping, or the original process run ended/replaced. Stop/Resume does not silently switch the wait to a new process.
-- `removed`: target removed while waiting; includes last observed status/activity.
-- `timeout`: deadline reached; includes last observed status/activity. This is a normal result, not HTTP 504.
-
-Unknown activity is not idle; it keeps waiting. An initially missing target returns 404; invalid parameters return 400, using the existing flat `{error:"..."}` format. Server shutdown releases pending waits with 503 when the connection remains open. Caller disconnect cancels only that caller's wait; it does not stop or modify the target. Waits are event-driven, not repeated polling, and observe fast turn transitions independently of SSE snapshot coalescing. No request id, deduplication, automatic retries or new authentication is introduced.
-
-```sh
-curl -fsS --max-time 65 -X POST "$AGENT_CANVAS_URL/api/agents/<AGENT_ID>/wait" -H 'Content-Type: application/json' -d '{"timeoutMs":60000}'
-```
-
-Set curl and your shell tool timeout above the server deadline to receive a normal timeout result. A foreground wait occupies that shell call until it finishes. Message delivery still only acknowledges PTY submission: if waiting for a newly sent task, confirm the target started working first. Already-idle returns immediately and does not prove a newly queued message has been processed.
+`POST /api/agents/:id/wait` is no longer supported (404). Use canvas_subscribe for future Agent events and canvas_read for current state. Subscribing to an already-idle agent does not synthesize a new event. HTTP-only clients retain metadata/output queries but have no blocking wait or automatic subscription fallback.
 
 ## Card box
 
