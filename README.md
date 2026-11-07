@@ -40,6 +40,10 @@ Serve persists across reboots; **Canvas must still be running with the origin se
 
 The script finds `tailscale` on PATH or the bundled macOS CLI at `/Applications/Tailscale.app/Contents/MacOS/Tailscale`, using `TAILSCALE_BE_CLI=1`. You can set `TAILSCALE_BIN=/absolute/path/to/cli`. Serve always targets Vite port 5173; `--port`/production options are not supported. Vite uses strict port selection, so a busy 5173 causes an error instead of silently using 5174. Only the configured HTTPS hostname is explicitly allowed (not `allowedHosts: true`); HMR automatically uses ws:// locally and wss:// through the HTTPS proxy. If you explicitly set a different backend `PORT`, both backend and Vite's API proxy use it, but Serve still targets 5173. HTTPS Serve remains on port 443. Check setup's `--help` for usage.
 
+## Experimental shared-memory awareness
+
+Enabled by default on supported macOS/Linux installations. `npm run dev` and `npm start` build the native addon automatically before starting; set `AGENT_CANVAS_SHARED_MEMORY=0` for HTTP-only startup without compilation. Scratch publishes a read-only POSIX shared-memory projection; newly launched/restored Pi agents receive a `canvas_read` tool that reads summaries without HTTP. No ordinary state file mapping, Pi fork, automatic messaging or replacement of the HTTP control API. See [setup, lifecycle and limitations](docs/shared-memory.md). Do not restart live agents automatically.
+
 ## Agent status, output and waiting
 
 Agent control remains HTTP/curl. `GET /api/agents` lists lightweight metadata, and `GET /api/agents/:id` reads one agent. These queries and `GET /api/state` omit terminal output; **`GET /api/agents/:id/output` still reads the recent raw ANSI tail** (up to 80,000 characters) when needed. Interactive source remains excluded from lists/state and is available through the full card endpoint. Browser SSE/terminal replay and saved output are unchanged.

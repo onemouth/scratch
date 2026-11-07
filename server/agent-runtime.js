@@ -10,7 +10,7 @@ const failure = (message, status = 400) => Object.assign(new Error(message), { s
 
 // Owns process/run/activity state. Domain operations own canvas records; HTTP
 // and terminal transport never implement process/session/wait semantics.
-export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate }) {
+export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate, getMemory = () => null }) {
   const processes = new Map(), runs = new Map(), activity = new Map(), listeners = new Set();
   const notify = () => { for (const listener of listeners) listener(); };
   const requireAgent = id => {
@@ -50,14 +50,17 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
     const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The local canvas API is at ${base}/api. When working with Canvas agents, delegation, messages, progress notes, or card-box cards, read and follow the agent-canvas skill. The skill points to the current API guide. Relationships represent real delegation, not automatic messaging. You may specify or adjust positions and sizes of Agent Canvas objects through the documented API; check conflicts and human interaction locks. Card box positions and viewports remain human-only.${agent.workspace === 'card-box' ? ' You are the single Card box agent. Use the Canvas API for card operations when asked; never directly edit SQLite, Canvas JSON, backup or lock files in your workdir.' : ''}`;
     let child;
     try {
-      const common = ['--tui-mode', 'regular', '--extension', join(root, 'server', 'pi-session-tracker.js'), '--skill', join(root, 'skills', 'agent-canvas', 'SKILL.md'), '--append-system-prompt', instructions];
+      const memory = getMemory();
+      const common = ['--tui-mode', 'regular', '--extension', join(root, 'server', 'pi-session-tracker.js'),
+        ...(memory ? ['--extension', join(root, 'server', 'pi-canvas-memory.js')] : []), '--skill', join(root, 'skills', 'agent-canvas', 'SKILL.md'), '--append-system-prompt', instructions];
       const args = restoring
         ? [...(exactSession ? ['--session', agent.sessionFile] : ['--resume']), ...common]
         : mode === 'resume' ? ['--resume', ...common]
           : ['--name', agent.name, ...common, ...(agent.task ? ['--', agent.task] : [])];
       child = spawnAgent('pi', args, {
         cwd: workdir, cols: 50, rows: 16, name: 'xterm-256color',
-        env: { ...process.env, TERM: 'xterm-256color', PI_IMAGE_PROTOCOL: 'none', AGENT_CANVAS_URL: base, AGENT_CANVAS_ID: id, AGENT_CANVAS_RUN: runToken },
+        env: { ...process.env, TERM: 'xterm-256color', PI_IMAGE_PROTOCOL: 'none', AGENT_CANVAS_URL: base, AGENT_CANVAS_ID: id, AGENT_CANVAS_RUN: runToken,
+          AGENT_CANVAS_SHM_NAME: memory?.name ?? '', AGENT_CANVAS_SHM_EPOCH: memory?.epoch ?? '' },
       });
     } catch (error) {
       runs.delete(id);

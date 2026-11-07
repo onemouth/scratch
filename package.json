@@ -5,8 +5,14 @@
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/fix-pty-helper.js",
+    "predev": "node scripts/build-shm.js --if-enabled",
+    "prestart": "node scripts/build-shm.js --if-enabled",
+    "pretest": "node scripts/build-shm.js --if-enabled",
     "dev": "concurrently -k \"node server/index.js\" \"vite --host 127.0.0.1\"",
     "build": "vite build",
+    "build:shm": "node scripts/build-shm.js",
+    "test:shm": "npm run build:shm && node --test shared/canvas-memory.test.js server/canvas-memory.test.js",
+    "test:shm:pi": "npm run build:shm && node scripts/tests/pi-shm-smoke.mjs",
     "start": "node server/index.js",
     "tailscale:setup": "node scripts/tailscale-setup.js",
     "test": "node --test",
@@ -31,6 +37,7 @@
   },
   "devDependencies": {
     "concurrently": "^9.2.5",
+    "node-gyp": "13.1.0",
     "vite": "7.3.7"
   },
   "overrides": {

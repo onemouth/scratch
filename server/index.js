@@ -15,6 +15,7 @@ import { createAgentRuntime } from './agent-runtime.js';
 import { createCanvasOperations } from './canvas-operations.js';
 import { createHttpHandler, reply } from './http-routes.js';
 import { attachTerminalTransport } from './terminal-transport.js';
+import { createCanvasMemory } from './canvas-memory.js';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const dist = join(root, 'dist');
@@ -22,6 +23,7 @@ const apiGuide = join(root, 'docs', 'agent-api.md');
 
 export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = pty.spawn, stateFile = null, cardsFile = stateFile ? stateFile + '.cards.sqlite' : ':memory:',
   publicOrigin = process.env.AGENT_CANVAS_PUBLIC_ORIGIN,
+  sharedMemory = process.env.AGENT_CANVAS_SHARED_MEMORY !== '0',
   mediaDirectory = cardsFile === ':memory:' ? null : dirname(resolve(cardsFile)),
   interactiveMediaRoot = join(homedir(), 'Documents', 'agent-canvas', 'media'),
   sessionsRoot = process.env.PI_CODING_AGENT_SESSION_DIR || join(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'), 'sessions') } = {}) {
@@ -39,6 +41,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   function geometry({ id, x, y, width, height }) { return { id, x, y, width, height }; }
   let views;
   let cards;
+  let memory;
   const clients = new Set();
   const terminals = new Map();
   let pending = false;
@@ -76,6 +79,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   };
   const publishImmediate = () => {
     if (closing) return;
+    memory?.publish();
     const data = `data: ${JSON.stringify(snapshot())}\n\n`;
     for (const client of clients) client.write(data);
   };
@@ -88,6 +92,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     agents, spawnAgent, terminals, root, broadcast, publishImmediate,
     getBaseUrl: () => `http://127.0.0.1:${server.address()?.port || port}`,
     isClosing: () => closing,
+    getMemory: () => memory,
   });
   const { startAgent, stopProcesses } = runtime;
   const operate = createCanvasOperations({
@@ -108,6 +113,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   const wss = attachTerminalTransport({ server, agents, processes: runtime.processes, terminals, allowedOrigin });
   return {
     server, snapshot, runtime,
+    get sharedMemory() { return memory ? { name: memory.name, epoch: memory.epoch, error: memory.error } : null; },
     listen: async () => {
       unlock = lockCanvas(stateFile);
       let saved;
@@ -130,8 +136,13 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       }
       try {
         views = new CardViews(saved?.cardBox, cards.list());
+        if (sharedMemory) memory = createCanvasMemory({
+          ...(typeof sharedMemory === 'object' ? sharedMemory : {}),
+          getState: () => ({ agents: runtime.list(), edges: [...edges.values()], notes: [...notes.values()],
+            cards: cards.list({ includeInteractiveSource: false }), cardPlacements: [...cardPlacements.values()] }),
+        });
         await new Promise((resolveListen, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolveListen); });
-      } catch (error) { cards.close(); unlockCards(); unlock(); throw error; }
+      } catch (error) { memory?.close(); cards.close(); unlockCards(); unlock(); throw error; }
       started = true;
       for (const agent of agents.values()) {
         if (agent.status !== 'running') { agent.status = 'stopped'; continue; }
@@ -144,6 +155,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       if (closePromise) return closePromise;
       flush(); // Save running intent BEFORE shutdown kills change process status.
       closing = true;
+      memory?.close();
       runtime.notify();
       closePromise = (async () => {
         for (const client of clients) client.end();

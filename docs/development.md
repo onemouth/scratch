@@ -48,7 +48,14 @@ Agent Canvas layout regression: verify explicit creation geometry and partial up
 
 Agent query/wait checks: use isolated fake PTYs. Verify metadata-only state/list/single-agent queries and explicit bounded ANSI output reads (including stopped agents), full card source on demand, unchanged SSE/WS replay and output persistence. Test immediate idle/stopped, unknown timeout, invalid body/timeout, missing targets, fast activity transitions, stale reports, Stop/Resume pinning, removal, independent multiple waiters, client abort and shutdown cleanup. `server/agent-queries.test.js` includes a real curl long-poll test. Do not replace the flat HTTP error format or use live agents for these tests.
 
+Shared-memory prototype: `npm run test:shm` compiles the optional POSIX addon and requires its tests to run. `npm run test:shm:pi` uses the installed Pi CLI in an isolated temporary directory, confirms production tool registration and invokes its reader implementation without an LLM call or HTTP. Test writers/readers/corruption helpers own unique shm names only. Never inspect/delete unknown shared-memory objects or use live agents for cleanup tests. See [shared-memory setup](shared-memory.md). npm dev/start/test lifecycle hooks build the addon by default; `AGENT_CANVAS_SHARED_MEMORY=0` skips that build and defaults the server to HTTP-only. Native cases are explicitly skipped if unbuilt, and test:shm always requires compilation. Do not run a rebuild concurrently with native readers/tests. No runtime fallback pretends memory is shared.
+
 ## Source map
+
+- `native/canvas-shm/` — owned Node-API POSIX snapshot binding and upstream MIT notice.
+- `server/canvas-memory.js`, `shared/canvas-memory.js` — projection publication, protocol validation and bounded pages.
+- `server/pi-canvas-memory.js` — optional read-only Pi tool, no auto-context or message delivery.
+- `scripts/build-shm.js`, `scripts/tests/*shm*` — local build and isolated native/real-Pi fixtures.
 
 - `server/index.js` — composition root, Canvas state, auto-save/restore, publication and shutdown orchestration.
 - `server/canvas-operations.js` — domain validation/mutations for cards, notes, views, layout, agents, delegation and messages.
