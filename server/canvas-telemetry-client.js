@@ -3,10 +3,10 @@ import { messagingNative, messageQueue } from '../shared/canvas-messages.js';
 import { TELEMETRY_VERSION, TELEMETRY_SLOTS, TELEMETRY_TTL, telemetryError, validateTelemetry, validateTelemetryConfig } from '../shared/canvas-telemetry.js';
 
 export function createCanvasTelemetryClient({ config, name, epoch, onReceipt = () => {}, onError = () => {},
-  native = messagingNative(), open = openCanvasMemory, watchdogMs = 1000, now = Date.now }) {
+  native = messagingNative(), open = openCanvasMemory, watchdogMs = 1000, now = Date.now, onReady = () => {} }) {
   validateTelemetryConfig(config, epoch);
   const resources = [], queues = {}, history = new Map(), pending = new Map();
-  let closed = false, seq = 0, timer, tx;
+  let closed = false, paused = false, draining = false, seq = 0, timer, tx;
   const read = () => { const reader = open(name, epoch); try { reader.read(); } finally { reader.close(); } };
   const remember = status => {
     history.delete(status.seq); history.set(status.seq, status);
@@ -17,10 +17,21 @@ export function createCanvasTelemetryClient({ config, name, epoch, onReceipt = (
     closed = true; clearInterval(timer);
     for (const dispose of resources.reverse()) dispose();
   };
+  const pause = error => {
+    if (paused) return;
+    paused = true;
+    // Publication may already have happened. Retain queues/credits and accept
+    // later receipt evidence, but never replay these uncertain reports.
+    for (const seq of pending.keys()) remember({ seq, status: 'unknown', code: 'SHM_STALE' });
+    onError(error);
+  };
   const drain = () => {
-    if (closed) return;
+    if (closed || draining) return;
+    draining = true;
     try {
-      read();
+      read(); // Validates the original name AND epoch before resuming any writes.
+      const resumed = paused;
+      paused = false;
       for (let i = 0; i < TELEMETRY_SLOTS; i++) {
         const entry = queues.receipts.peek(); if (!entry) break;
         const status = entry.value;
@@ -37,10 +48,17 @@ export function createCanvasTelemetryClient({ config, name, epoch, onReceipt = (
         const status = { seq, status: 'unknown', code: 'TELEMETRY_ACK_TIMEOUT' };
         pending.delete(seq); remember(status); onReceipt(status);
       }
-    } catch (error) { close(); onError(error); }
+      onReady({ resumed });
+    } catch (error) {
+      if (error.code === 'SHM_STALE') pause(error);
+      else { close(); onError(error); }
+    } finally { draining = false; }
   };
   try {
-    read();
+    try { read(); } catch (error) {
+      if (error.code !== 'SHM_STALE') throw error;
+      pause(error);
+    }
     for (const [key, role] of [['reports', 'producer'], ['receipts', 'consumer']]) {
       queues[key] = messageQueue(native, native.queueOpen(config[key], role));
       resources.push(() => queues[key].close());
@@ -54,6 +72,7 @@ export function createCanvasTelemetryClient({ config, name, epoch, onReceipt = (
     send(kind, data) {
       drain();
       if (closed) throw telemetryError('SHM_CLOSED', 'Telemetry process channel closed; no HTTP fallback or automatic resend');
+      if (paused) throw telemetryError('SHM_STALE', 'Telemetry paused until the original server heartbeat recovers; report not queued');
       if (pending.size >= TELEMETRY_SLOTS) throw telemetryError('TELEMETRY_LIMIT', 'Telemetry receipt window full');
       const frame = { version: TELEMETRY_VERSION, seq: seq + 1, kind, data, expiresAt: now() + TELEMETRY_TTL };
       validateTelemetry(frame, now());
@@ -69,6 +88,9 @@ export function createCanvasTelemetryClient({ config, name, epoch, onReceipt = (
       if (closed && last.status === 'queued') return { ...last, status: 'unknown', code: 'TELEMETRY_CHANNEL_CLOSED' };
       return { ...last };
     },
-    drain, close, get closed() { return closed; },
+    // Recovery snapshots need two report credits; do not partially refresh on
+    // every watchdog tick while old reports are still blocking the queue.
+    get available() { return closed || paused ? 0 : Math.min(TELEMETRY_SLOTS - pending.size, TELEMETRY_SLOTS - queues.reports.used); },
+    drain, close, get closed() { return closed; }, get paused() { return paused; },
   };
 }

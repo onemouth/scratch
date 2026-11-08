@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { randomUUID } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { EventEmitter } from 'node:events';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
@@ -20,11 +21,11 @@ import { openCanvasMemory } from '../shared/canvas-memory.js';
 const built = ['darwin', 'linux'].includes(process.platform) && existsSync(new URL('../native/canvas-shm/build/Release/canvas_shm.node', import.meta.url));
 const nativeTest = (name, fn) => test(name, { skip: built ? false : 'Run npm run test:shm to build the native addon' }, fn);
 
-function fixture(apply) {
+function fixture(apply, options = {}) {
   const state = { agents: ['a', 'b'].map(id => ({ id, name: id, status: 'running', activity: 'idle', processGeneration: randomUUID() })), edges: [], notes: [], cards: [], cardPlacements: [] };
   const memory = createCanvasMemory({ getState: () => state });
   const frames = [], errors = [];
-  const service = createCanvasTelemetry({ epoch: memory.epoch, apply: apply ?? ((id, generation, frame) => frames.push({ id, generation, ...frame })), watchdogMs: 60000, onError: error => errors.push(error) });
+  const service = createCanvasTelemetry({ epoch: memory.epoch, apply: apply ?? ((id, generation, frame) => frames.push({ id, generation, ...frame })), watchdogMs: 60000, onError: error => errors.push(error), ...options });
   const channel = service.createChannel('a', state.agents[0].processGeneration);
   let client;
   return { state, memory, service, channel, frames, errors,
@@ -34,6 +35,13 @@ function fixture(apply) {
   };
 }
 const errorCode = code => error => error.code === code;
+// Only our fresh, private fixture name; never touch a live publisher.
+const staleHeartbeat = memory => execFileSync('python3', [new URL('../scripts/tests/shm-corrupt.py', import.meta.url).pathname, 'field', memory.name, '6', '0']);
+function trackerInstance() {
+  const hooks = new Map(), tools = new Map(), warnings = [];
+  tracker({ on: (name, fn) => hooks.set(name, fn), registerTool: tool => tools.set(tool.name, tool) });
+  return { hooks, tools, context: id => ({ mode: 'tui', hasUI: true, isIdle: () => true, ui: { notify: (...args) => warnings.push(args) }, sessionManager: { getSessionFile: () => `/owned/${id}.jsonl`, getSessionId: () => id } }), warnings };
+}
 
 nativeTest('telemetry uses real independent queues, inferred identity, bounded reports and applied receipts', () => {
   const f = fixture();
@@ -112,11 +120,7 @@ nativeTest('post-application failure fences telemetry as unknown, never safe-to-
 nativeTest('SHM telemetry remains process-owned across new/reload/resume/fork; stale handlers/tools cannot publish', async () => {
   const f = fixture(), saved = { ...process.env }, originalFetch = globalThis.fetch;
   const key = Symbol.for('agent-canvas.telemetry.process.v1');
-  const instance = () => {
-    const hooks = new Map(), tools = new Map(), warnings = [];
-    tracker({ on: (name, fn) => hooks.set(name, fn), registerTool: tool => tools.set(tool.name, tool) });
-    return { hooks, tools, context: id => ({ mode: 'tui', hasUI: true, isIdle: () => true, ui: { notify: (...args) => warnings.push(args) }, sessionManager: { getSessionFile: () => `/owned/${id}.jsonl`, getSessionId: () => id } }), warnings };
-  };
+  const instance = trackerInstance;
   try {
     Object.assign(process.env, { AGENT_CANVAS_ID: 'a', AGENT_CANVAS_URL: '', AGENT_CANVAS_RUN: '', AGENT_CANVAS_TELEMETRY_TRANSPORT: 'shm',
       AGENT_CANVAS_SHM_TELEMETRY: JSON.stringify(f.channel.config), AGENT_CANVAS_SHM_NAME: f.memory.name, AGENT_CANVAS_SHM_EPOCH: f.memory.epoch });
@@ -182,6 +186,109 @@ nativeTest('wrong server epoch fails before claiming queues; a closed server fen
     assert.equal(client.closed, true); assert.equal(client.status(sent.seq).status, 'unknown');
     assert.throws(() => client.send('progress', { text: 'No reconnect' }), errorCode('SHM_CLOSED'));
   } finally { f.close(); }
+});
+
+nativeTest('stale heartbeat pauses without releasing queues or replaying reports; same-epoch recovery retains evidence', () => {
+  const f = fixture(), errors = [], ready = [];
+  try {
+    const client = f.client({ onError: error => errors.push(error.code), onReady: state => ready.push(state) });
+    const sent = client.send('progress', { text: 'Applied before sleep' });
+    f.service.drain(); // Receipt exists but has not yet been read.
+    staleHeartbeat(f.memory); client.drain();
+    assert.equal(client.paused, true); assert.equal(client.closed, false);
+    assert.equal(client.available, 0); assert.equal(client.status(sent.seq).status, 'unknown');
+    for (let i = 0; i < 3; i++) client.drain();
+    assert.throws(() => client.send('progress', { text: 'Do not defer me' }), errorCode('SHM_STALE'));
+    assert.deepEqual(errors, ['SHM_STALE']);
+    f.memory.publish(); client.drain();
+    assert.equal(client.paused, false); assert.equal(client.status(sent.seq).status, 'applied');
+    assert.equal(ready.filter(state => state.resumed).length, 1);
+    assert.equal(client.send('progress', { text: 'New report only' }).seq, 2);
+    f.pump();
+    assert.deepEqual(f.frames.map(frame => frame.data.text), ['Applied before sleep', 'New report only']);
+  } finally { f.close(); }
+});
+
+nativeTest('wake refresh samples the current binding, waits for credits, and never queues progress during sleep', async () => {
+  let clock;
+  const f = fixture(undefined, { now: () => clock ?? Date.now() }), saved = { ...process.env }, originalFetch = globalThis.fetch;
+  const key = Symbol.for('agent-canvas.telemetry.process.v1');
+  try {
+    Object.assign(process.env, { AGENT_CANVAS_ID: 'a', AGENT_CANVAS_URL: '', AGENT_CANVAS_RUN: '', AGENT_CANVAS_TELEMETRY_TRANSPORT: 'shm',
+      AGENT_CANVAS_SHM_TELEMETRY: JSON.stringify(f.channel.config), AGENT_CANVAS_SHM_NAME: f.memory.name, AGENT_CANVAS_SHM_EPOCH: f.memory.epoch });
+    globalThis.fetch = () => { throw new Error('HTTP forbidden'); };
+    const old = trackerInstance();
+    await old.hooks.get('session_start')({}, old.context('before-sleep'));
+    const broker = process[key], client = broker.client;
+    f.service.drain(); client.drain(); f.frames.length = 0;
+    for (let i = 0; i < 16; i++) broker.publish('progress', { text: `Do not replay ${i}` });
+    staleHeartbeat(f.memory); client.drain();
+    assert.match(old.warnings.at(-1)[0], /paused.*SHM_STALE/);
+    old.hooks.get('session_shutdown')({ reason: 'reload' });
+    const current = trackerInstance(), ctx = current.context('current-session');
+    let idle = true, session = 'during-sleep';
+    ctx.isIdle = () => idle;
+    ctx.sessionManager = { getSessionFile: () => `/owned/${session}.jsonl`, getSessionId: () => session };
+    await current.hooks.get('session_start')({}, ctx);
+    await assert.rejects(current.tools.get('canvas_set_progress').execute('paused', { text: 'Never deferred' }), errorCode('SHM_STALE'));
+    await assert.rejects(old.tools.get('canvas_set_progress').execute('stale', { text: 'Old context' }), errorCode('TELEMETRY_CONTEXT'));
+    assert.equal(client.closed, false); assert.equal(process[key], broker);
+    f.memory.publish(); client.drain();
+    assert.equal(client.paused, false); assert.equal(broker.refreshPending, true);
+    assert.equal(f.frames.length, 0, 'full window defers fresh snapshots, not old reports');
+    // The server rejects reports that expired during sleep, without applying them.
+    clock = Date.now() + 11000; f.service.drain(); clock = undefined;
+    idle = false; session = 'latest-at-recovery';
+    client.drain(); f.service.drain(); client.drain();
+    assert.equal(broker.refreshPending, false);
+    assert.deepEqual(f.frames.map(frame => [frame.kind, frame.seq, frame.data]), [
+      ['session', 19, { sessionFile: '/owned/latest-at-recovery.jsonl', sessionId: 'latest-at-recovery' }],
+      ['activity', 20, { state: 'working' }],
+    ]);
+    assert.equal(current.warnings.filter(([message]) => message.includes('heartbeat recovered')).length, 1);
+    client.drain(); f.service.drain(); assert.equal(f.frames.length, 2, 'no repeated recovery reports');
+    const progress = await current.tools.get('canvas_set_progress').execute('new', { text: 'New progress after wake' });
+    f.service.drain(); client.drain();
+    assert.equal(client.status(progress.details.seq).status, 'applied');
+    assert.equal(f.frames.at(-1).data.text, 'New progress after wake');
+    // Recovery while detached must not sample the previous context or wake a model.
+    staleHeartbeat(f.memory); client.drain();
+    current.hooks.get('session_shutdown')({ reason: 'new' });
+    const before = f.frames.length;
+    f.memory.publish(); client.drain(); f.service.drain();
+    assert.equal(f.frames.length, before);
+    const replacement = trackerInstance();
+    await replacement.hooks.get('session_start')({}, replacement.context('after-detached-wake'));
+    f.service.drain(); client.drain();
+    assert.equal(f.frames.at(-1).data.sessionId, 'after-detached-wake');
+    assert.equal(broker.refreshPending, false);
+  } finally { process[key]?.close(); globalThis.fetch = originalFetch; process.env = saved; f.close(); }
+});
+
+nativeTest('initial stale heartbeat can recover, but closed/replaced/incompatible generations remain fenced', () => {
+  for (const failure of ['closed', 'epoch', 'corrupt']) {
+    const f = fixture();
+    let incompatible = false;
+    try {
+      staleHeartbeat(f.memory);
+      const client = f.client({ open: (name, epoch) => openCanvasMemory(name, incompatible ? 'replacement-epoch' : epoch) });
+      assert.equal(client.paused, true); assert.equal(client.closed, false);
+      f.memory.publish(); client.drain();
+      assert.equal(client.paused, false);
+      const sent = client.send('progress', { text: 'Uncertain' });
+      staleHeartbeat(f.memory); client.drain();
+      if (failure === 'closed') f.memory.close();
+      else if (failure === 'epoch') { incompatible = true; f.memory.publish(); }
+      else {
+        f.memory.publish();
+        execFileSync('python3', [new URL('../scripts/tests/shm-corrupt.py', import.meta.url).pathname, 'field', f.memory.name, '5', '0']);
+      }
+      client.drain();
+      assert.equal(client.closed, true, failure);
+      assert.equal(client.status(sent.seq).status, 'unknown');
+      assert.throws(() => client.send('progress', { text: 'No reconnect' }), errorCode('SHM_CLOSED'));
+    } finally { f.close(); }
+  }
 });
 
 const eventually = async predicate => {

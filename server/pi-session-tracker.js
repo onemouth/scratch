@@ -49,7 +49,11 @@ export default function sessionTracker(pi) {
     try {
       const config = mode === 'shm' ? JSON.parse(process.env.AGENT_CANVAS_SHM_TELEMETRY) : undefined;
       broker = bindTelemetryProcess({ mode, config, base, id, runToken, ctx, owner,
-        name: process.env.AGENT_CANVAS_SHM_NAME, epoch: process.env.AGENT_CANVAS_SHM_EPOCH });
+        name: process.env.AGENT_CANVAS_SHM_NAME, epoch: process.env.AGENT_CANVAS_SHM_EPOCH,
+        snapshot: () => ({
+          session: { sessionFile: ctx.sessionManager.getSessionFile() ?? null, sessionId: ctx.sessionManager.getSessionId() },
+          activity: { state: ctx.isIdle() === false ? 'working' : 'idle' },
+        }) });
       preview = '';
       publish('activity', { state: ctx.isIdle() === false ? 'working' : 'idle' });
       await publish('session', { sessionFile: ctx.sessionManager.getSessionFile() ?? null, sessionId: ctx.sessionManager.getSessionId() });

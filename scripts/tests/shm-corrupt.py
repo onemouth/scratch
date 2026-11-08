@@ -27,6 +27,6 @@ else:
     os.close(fd)
     assert ptr != ctypes.c_void_p(-1).value, ctypes.get_errno()
     field, value = int(sys.argv[3]), int(sys.argv[4])
-    assert field in (1, 4, 5)
+    assert field in (1, 4, 5, 6)  # 6: fixture-owned heartbeat, for pause/recovery tests
     ctypes.c_uint64.from_address(ptr + field * 8).value = value
     lib.munmap(ptr, 64)
