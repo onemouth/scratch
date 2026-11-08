@@ -17,6 +17,7 @@ import { createHttpHandler, reply } from './http-routes.js';
 import { attachTerminalTransport } from './terminal-transport.js';
 import { createCanvasMemory } from './canvas-memory.js';
 import { createCanvasMessaging } from './canvas-messages.js';
+import { createCanvasTelemetry } from './canvas-telemetry.js';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const dist = join(root, 'dist');
@@ -42,7 +43,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   function geometry({ id, x, y, width, height }) { return { id, x, y, width, height }; }
   let views;
   let cards;
-  let memory, messaging;
+  let memory, messaging, telemetry;
   const clients = new Set();
   const terminals = new Map();
   let pending = false;
@@ -95,6 +96,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     isClosing: () => closing,
     getMemory: () => memory,
     getMessaging: () => messaging,
+    getTelemetry: () => telemetry,
     onChange: () => memory?.observeAgents(),
   });
   const { startAgent, stopProcesses } = runtime;
@@ -147,8 +149,9 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
         });
         if (memory) messaging = createCanvasMessaging({ epoch: memory.epoch,
           getAgent: id => agents.has(id) ? runtime.describe(agents.get(id)) : null });
+        if (memory) telemetry = createCanvasTelemetry({ epoch: memory.epoch, apply: runtime.applyTelemetry });
         await new Promise((resolveListen, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolveListen); });
-      } catch (error) { messaging?.close(); memory?.close(); cards.close(); unlockCards(); unlock(); throw error; }
+      } catch (error) { telemetry?.close(); messaging?.close(); memory?.close(); cards.close(); unlockCards(); unlock(); throw error; }
       started = true;
       for (const agent of agents.values()) {
         if (agent.status !== 'running') { agent.status = 'stopped'; continue; }
@@ -161,7 +164,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       if (closePromise) return closePromise;
       flush(); // Save running intent BEFORE shutdown kills change process status.
       closing = true;
-      messaging?.close(); memory?.close();
+      telemetry?.close(); messaging?.close(); memory?.close();
       closePromise = (async () => {
         for (const client of clients) client.end();
         for (const group of terminals.values()) for (const ws of group) ws.terminate();

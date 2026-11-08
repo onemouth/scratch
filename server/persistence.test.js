@@ -27,7 +27,7 @@ test('autosave, exact session restore, stopped nodes, session switches, reset an
   const session = join(dir, 'conversation.jsonl');
   await writeFile(session, JSON.stringify({ type: 'session', version: 3, id: 'session-1', cwd: dir }) + '\n');
   const one = spawner();
-  let app = createApp({ port: 0, stateFile: file, spawnAgent: one.spawn });
+  let app = createApp({ port: 0, sharedMemory: false, stateFile: file, spawnAgent: one.spawn });
   try {
     await app.listen();
     const parent = (await request(app, '/agents', { name: 'A', workdir: dir, task: 'DO NOT REPLAY' })).data;
@@ -47,7 +47,7 @@ test('autosave, exact session restore, stopped nodes, session switches, reset an
     await app.close(); // Repeated shutdown must not persist shutdown-induced stopped states.
     assert.equal(JSON.parse(await readFile(file, 'utf8')).agents[0].status, 'running');
     const two = spawner();
-    app = createApp({ port: 0, stateFile: file, spawnAgent: two.spawn });
+    app = createApp({ port: 0, sharedMemory: false, stateFile: file, spawnAgent: two.spawn });
     await app.listen();
     assert.equal(two.children.length, 1);
     assert.deepEqual(two.children[0].args.slice(0, 2), ['--session', session]);

@@ -3,13 +3,14 @@ import { existsSync, statSync, readFileSync } from 'node:fs';
 import { isAbsolute, join } from 'node:path';
 import { WebSocket } from 'ws';
 import { validText } from './validation.js';
+import { validateTelemetryData } from '../shared/canvas-telemetry.js';
 
 export const MAX_OUTPUT = 80000;
 const failure = (message, status = 400) => Object.assign(new Error(message), { status });
 
 // Owns process/run/activity state. Domain operations own canvas records; HTTP
 // and terminal transport never implement process/session semantics.
-export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate, getMemory = () => null, getMessaging = () => null, onChange = () => {} }) {
+export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate, getMemory = () => null, getMessaging = () => null, getTelemetry = () => null, onChange = () => {} }) {
   const processes = new Map(), runs = new Map(), activity = new Map();
   const notify = onChange;
   const requireAgent = id => {
@@ -54,6 +55,8 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
       runs.get(id).notifier = notifier;
       const messages = getMessaging()?.createChannel(id, runs.get(id).generation);
       runs.get(id).messages = messages;
+      const telemetry = getTelemetry()?.createChannel(id, runs.get(id).generation);
+      runs.get(id).telemetry = telemetry;
       const common = ['--tui-mode', 'regular', '--extension', join(root, 'server', 'pi-session-tracker.js'),
         ...(memory ? ['--extension', join(root, 'server', 'pi-canvas-memory.js')] : []),
         ...(messages ? ['--extension', join(root, 'server', 'pi-canvas-messages.js')] : []), '--skill', join(root, 'skills', 'agent-canvas', 'SKILL.md'), '--append-system-prompt', instructions];
@@ -65,9 +68,12 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
         cwd: workdir, cols: 50, rows: 16, name: 'xterm-256color',
         env: { ...process.env, TERM: 'xterm-256color', PI_IMAGE_PROTOCOL: 'none', AGENT_CANVAS_URL: base, AGENT_CANVAS_ID: id, AGENT_CANVAS_RUN: runToken,
           AGENT_CANVAS_SHM_NAME: memory?.name ?? '', AGENT_CANVAS_SHM_EPOCH: memory?.epoch ?? '', AGENT_CANVAS_SHM_NOTIFY: runs.get(id)?.notifier?.name ?? '',
-          AGENT_CANVAS_SHM_MESSAGES: messages ? JSON.stringify(messages.config) : '' },
+          AGENT_CANVAS_SHM_MESSAGES: messages ? JSON.stringify(messages.config) : '',
+          AGENT_CANVAS_TELEMETRY_TRANSPORT: telemetry ? 'shm' : 'http',
+          AGENT_CANVAS_SHM_TELEMETRY: telemetry ? JSON.stringify(telemetry.config) : '' },
       });
     } catch (error) {
+      runs.get(id)?.telemetry?.close();
       runs.get(id)?.messages?.close();
       runs.get(id)?.notifier?.close();
       runs.delete(id);
@@ -88,6 +94,7 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
       const wasStopping = agent.status === 'stopping';
       agent.status = 'stopped';
       notify(); // Observe the old run ending even if restore immediately replaces it.
+      run?.telemetry?.close();
       run?.messages?.close();
       run?.notifier?.close();
       if (!isClosing() && !wasStopping && restoring && exactSession && !run?.ready && exitCode !== 0 && agents.has(id)) {
@@ -113,19 +120,27 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
     })));
   };
 
-  const reportSession = (id, body) => {
+  const reportSession = (id, body, transport = 'http') => {
     const agent = requireAgent(id), run = runs.get(id);
     if (!run || body.runToken !== run.token) throw failure('Stale Pi process', 409);
+    if (transport === 'http' && run.telemetry) throw failure('This Pi process reports through SHM telemetry', 409);
+    if (body.seq !== undefined && (!Number.isSafeInteger(body.seq) || body.seq < 1)) throw failure('Invalid session sequence');
+    if (run.sessionSeq !== undefined && body.seq === undefined) throw failure('Session sequence required');
     if (body.sessionFile !== null && (!validText(body.sessionFile, 4096) || !isAbsolute(body.sessionFile))) throw failure('Invalid session file');
     if (!validText(body.sessionId, 100)) throw failure('Invalid session ID');
+    if (body.seq !== undefined) {
+      if (body.seq <= (run.sessionSeq ?? 0)) return { ok: true };
+      run.sessionSeq = body.seq;
+    }
     agent.sessionFile = body.sessionFile; agent.sessionId = body.sessionId;
     run.ready = true; agent.restoreWarning = '';
     broadcast(); return { ok: true };
   };
-  const reportActivity = (id, body) => {
+  const reportActivity = (id, body, transport = 'http') => {
     requireAgent(id);
     const run = runs.get(id);
     if (!run || body.runToken !== run.token) throw failure('Stale Pi process', 409);
+    if (transport === 'http' && run.telemetry) throw failure('This Pi process reports through SHM telemetry', 409);
     if (!['working', 'idle'].includes(body.state) || !Number.isSafeInteger(body.seq) || body.seq < 0) throw failure('Invalid activity report');
     if (body.summary !== undefined && (body.state !== 'idle' || !validText(body.summary, 240))) throw failure('Invalid activity summary');
     const previous = activity.get(id);
@@ -136,7 +151,20 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
     }
     return { ok: true };
   };
+  const applyTelemetry = (id, generation, frame) => {
+    const agent = requireAgent(id), run = runs.get(id);
+    if (!run || run.generation !== generation || !run.telemetry || agent.status !== 'running') {
+      throw Object.assign(failure('Stale telemetry process', 409), { code: 'TELEMETRY_GENERATION' });
+    }
+    validateTelemetryData(frame.kind, frame.data);
+    const body = { ...frame.data, runToken: run.token, seq: frame.seq };
+    if (frame.kind === 'session') return reportSession(id, body, 'shm');
+    if (frame.kind === 'activity') return reportActivity(id, body, 'shm');
+    if (frame.kind !== 'progress') throw failure('Unknown telemetry kind');
+    agent.note = frame.data.text; broadcast(); return { ok: true };
+  };
   return {
+    applyTelemetry,
     processes, startAgent, stopProcesses, requireAgent, describe, notify, reportSession, reportActivity,
     list: () => [...agents.values()].map(agent => describe(agent)),
     get: id => describe(requireAgent(id)),

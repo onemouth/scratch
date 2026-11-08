@@ -5,9 +5,9 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createApp } from './index.js';
 
-async function fixture() {
+async function fixture(options = {}) {
   const children = [];
-  const app = createApp({ port: 0, spawnAgent: (_bin, args, options) => {
+  const app = createApp({ port: 0, ...options, spawnAgent: (_bin, args, options) => {
     const child = new EventEmitter();
     Object.assign(child, { args, options, onData: fn => child.on('data', fn), onExit: fn => child.on('exit', fn), write() {}, resize() {}, kill: () => child.emit('exit', { exitCode: 0 }) });
     children.push(child); return child;
@@ -84,8 +84,8 @@ test('removed HTTP wait routes return 404 without changing agents, including HTT
   } finally { await httpOnly.close(); }
 });
 
-test('activity reports still reject stale sequences and replaced process tokens without HTTP wait', async () => {
-  const { app, children, agent, request } = await fixture();
+test('HTTP-only activity reports still reject stale sequences and replaced process tokens without HTTP wait', async () => {
+  const { app, children, agent, request } = await fixture({ sharedMemory: false });
   try {
     const oldToken = children[0].options.env.AGENT_CANVAS_RUN;
     const report = (state, seq, runToken = oldToken) => request(`/agents/${agent.id}/activity`, 'POST', { runToken, state, seq });
@@ -97,8 +97,14 @@ test('activity reports still reject stale sequences and replaced process tokens 
     await request(`/agents/${agent.id}/resume`, 'POST', {});
     assert.equal((await report('idle', 12)).status, 409);
     assert.equal((await request(`/agents/${agent.id}`)).body.activity, 'unknown');
-    assert.equal((await report('working', 1, children[1].options.env.AGENT_CANVAS_RUN)).status, 200);
+    const newToken = children[1].options.env.AGENT_CANVAS_RUN;
+    assert.equal((await report('working', 1, newToken)).status, 200);
     assert.equal((await request(`/agents/${agent.id}`)).body.activity, 'working');
+    const session = (sessionId, seq) => request(`/agents/${agent.id}/session`, 'POST', { runToken: newToken, sessionFile: null, sessionId, seq });
+    assert.equal((await session('newer', 10)).status, 200);
+    assert.equal((await session('late-older', 9)).status, 200);
+    assert.equal((await request(`/agents/${agent.id}`)).body.sessionId, 'newer');
+    assert.equal((await session('unsequenced', undefined)).status, 400);
   } finally { await app.close(); }
 });
 

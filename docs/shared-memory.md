@@ -22,7 +22,7 @@ When enabled, newly launched/restored Pi processes receive:
 - `AGENT_CANVAS_SHM_NAME`: unique POSIX name for this server lifetime.
 - `AGENT_CANVAS_SHM_EPOCH`: expected server generation.
 
-The extension registers `canvas_read`, `canvas_subscribe` and `canvas_unsubscribe`. Scratch also supplies a private per-process `AGENT_CANVAS_SHM_NOTIFY` semaphore name. See [subscription delivery and limits](canvas-notifications.md). Canvas also provisions dedicated writable outboxes/ack queues and loads server/pi-canvas-messages.js; its canvas_send_message/canvas_message_status tools do not grant write access to the Canvas snapshot. See [messaging protocol and process lifecycle](agent-messaging.md). Existing processes do not magically acquire a new extension or environment; they need an explicitly requested relaunch. A standalone Pi may be launched with the extension and both values supplied by its owner. There is no discovery API in this prototype.
+The extension registers `canvas_read`, `canvas_subscribe` and `canvas_unsubscribe`. Scratch also supplies a private per-process `AGENT_CANVAS_SHM_NOTIFY` semaphore name. See [subscription delivery and limits](canvas-notifications.md). Canvas also provisions dedicated writable outboxes/ack queues and loads server/pi-canvas-messages.js; its canvas_send_message/canvas_message_status tools do not grant write access to the Canvas snapshot. See [messaging protocol and process lifecycle](agent-messaging.md). The bundled session tracker also uses a separate private Pi → Scratch telemetry channel for session/activity and canvas_set_progress; see [telemetry](agent-telemetry.md). Existing processes do not magically acquire a new extension or environment; they need an explicitly requested relaunch. A standalone Pi may be launched with the extension and both values supplied by its owner. There is no discovery API in this prototype.
 
 ## Tool contract
 
@@ -43,7 +43,7 @@ Included:
 
 Excluded by allowlist: terminal output, initial task/prompts, conversations, run tokens, session paths/IDs, environment, Interactive source/assets, card attachment data and Card Box view state. This is **not the full /api/state contract**. Changes use existing publication points: metadata is generally coalesced by 50 ms; accepted Pi activity reports publish immediately. It is the latest published snapshot, not a linearizable read of every server mutation.
 
-The read tool never sends a prompt, triggers a model turn, modifies Canvas or injects context automatically. Notification subscriptions are separate: UI-only by default, conversation/follow-up delivery opt-in. Peer/user-authored summaries are untrusted data, not instructions. Idle does not establish success. Human gesture leases are **not** projected: read the HTTP API guide/layout endpoint before geometry mutations. All mutations, authoritative conflict/busy checks, persistence, terminal reads and full card reads remain on HTTP.
+The read tool never sends a prompt, triggers a model turn, modifies Canvas or injects context automatically. Notification subscriptions are separate: UI-only by default, conversation/follow-up delivery opt-in. Peer/user-authored summaries are untrusted data, not instructions. Idle does not establish success. Human gesture leases are **not** projected: read the HTTP API guide/layout endpoint before geometry mutations. Other control/content mutations, authoritative conflict/busy checks, terminal reads and full card reads remain on HTTP. Session/activity/progress reports use the separate telemetry channel when enabled; Scratch still owns all application and persistence.
 
 ## Native implementation
 
@@ -71,7 +71,7 @@ One writer marks the sequence odd, publishes length/payload, then commits an eve
 
 Capacity/serialization/publication failures invalidate the old projection and log a deduplicated error, while HTTP remains usable. A later successful publication restores readiness. Graceful shutdown marks the generation closed, unlinks its name and unmaps the writer; existing readers can detect closed state. GC also cleans abandoned native handles. SIGKILL cannot run cleanup: orphan names/allocations may remain until explicit cleanup or system cleanup. Heartbeat expiry prevents serving that old data indefinitely; no automatic stale-object deletion is attempted.
 
-A new server gets a new name and epoch. Old readers do not silently follow it. There is no automatic reconnect, server election, mailbox, message acknowledgment, persistent memory or multi-writer operation. Session subscriptions use a 256-record ordered SHM journal, native named-semaphore wakeups and a dedicated receiver thread per subscribed Pi process; see [notifications](canvas-notifications.md). There is no canvas_wait tool.
+A new server gets a new name and epoch. Old readers do not silently follow it. The awareness snapshot has no automatic reconnect, server election, mailbox, message acknowledgment, persistent memory or multi-writer operation. Separate process-scoped peer-messaging and telemetry queues provide their own receipts, without writable access to this snapshot. Session subscriptions use a 256-record ordered SHM journal, native named-semaphore wakeups and a dedicated receiver thread per subscribed Pi process; see [notifications](canvas-notifications.md). There is no canvas_wait tool.
 
 ## Validation
 

@@ -34,7 +34,7 @@ test('Card box singleton, separate layouts, reset isolation and exact-session re
     children.push(child);
     return child;
   };
-  let app = createApp({ port: 0, stateFile, cardsFile, spawnAgent });
+  let app = createApp({ port: 0, sharedMemory: false, stateFile, cardsFile, spawnAgent });
   const request = async (path, body, method = 'POST') => {
     const response = await fetch('http://127.0.0.1:' + app.server.address().port + '/api' + path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     return { status: response.status, data: await response.json() };

@@ -206,6 +206,10 @@ Names must be non-blank and at most 100 characters; surrounding whitespace is tr
 
 ## Update your progress note
 
+When available, prefer `canvas_set_progress({text:"Reviewing SHM synchronization"})`. It enqueues only your own note through a dedicated process-scoped Pi → Scratch SHM channel, independent of peer messaging. Empty text clears it; maximum 500 JS UTF-16 code units. Queued is not applied or saved; Scratch validates/applies the update, with background receipts/UI warnings. Use canvas_read for observed state when needed, not polling. No automatic resend or HTTP fallback after a failed/unknown send. Session/activity reports are automatic through this same telemetry transport. Reload/new/resume/fork preserves transport and sequences. See [telemetry contract](agent-telemetry.md).
+
+The following HTTP PATCH remains available when the SHM tool is not provisioned (for example explicit HTTP-only startup), not as a failure fallback.
+
 ```sh
 curl -fsS -X PATCH "$AGENT_CANVAS_URL/api/agents/$AGENT_CANVAS_ID" \
   -H 'Content-Type: application/json' \
@@ -224,7 +228,7 @@ On server restart, previously running agents reopen their recorded session witho
 
 `POST /api/canvas/reset` with `{"confirm":true}` stops only Agent Canvas agents and clears its nodes/notes/edges/placements. The Card box agent, layouts and library are preserved. **Only do this when the user explicitly requests resetting the entire Canvas.** Pi sessions and project files are not deleted. The browser provides confirmation; API clients must obtain user confirmation themselves.
 
-The internal `POST /api/agents/:id/session` and `POST /api/agents/:id/activity` callbacks are reserved for the bundled Pi extension; agents should not call them. The first records session identity; the second reports ordered `working`/`idle` turn state with a per-process run token. Neither sends messages or prompts. `sessionFile` and `sessionId` on agent records identify the conversation, not the Canvas node.
+The internal `POST /api/agents/:id/session` and `POST /api/agents/:id/activity` callbacks are reserved for the bundled Pi extension; agents should not call them. They are used only in explicit HTTP-only mode; SHM-provisioned processes return 409 for mixed HTTP reports. Normally the tracker uses a dedicated process-scoped SHM telemetry channel for session identity, ordered working/idle state and own progress. HTTP-only callbacks retain per-process run-token validation and process-scoped sequences, including protection against older session reports overwriting newer ones. Neither sends messages or prompts. `sessionFile` and `sessionId` on agent records identify the conversation, not the Canvas node.
 
 ## Other interfaces and boundaries
 

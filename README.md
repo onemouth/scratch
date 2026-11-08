@@ -48,6 +48,8 @@ Agent notifications use `canvas_subscribe` / `canvas_unsubscribe`: registration 
 
 Agent-to-agent messaging uses `canvas_send_message` / `canvas_message_status`: per-process SHM outboxes, Scratch validation/routing, receiver mailboxes and semaphore wakeups. Both directions avoid HTTP and terminal paste. Default nextTurn does not wake; explicit followUp/wake has finite rate/lifetime budgets. Queued, accepted and delivered are distinct; delivered is only a Pi API handoff, not read/task completion. No automatic retry, persistence or restart replay. Channels, pending messages and receipt history belong to the Pi process and survive session changes/reload; delivery rebinds to the current Pi context. See [protocol and tools](docs/agent-messaging.md).
 
+Pi → Scratch telemetry uses a separate process-scoped SHM channel for activity, session identity and `canvas_set_progress`. Scratch alone validates/applies updates. It survives session changes/reload, does not compete with peer message queues, and never falls back to HTTP on failure. Explicit HTTP-only startup retains session/activity callbacks. See [telemetry lifecycle and receipts](docs/agent-telemetry.md).
+
 ## Agent status and output
 
 Agent lifecycle, layout and content control remain HTTP/curl. `GET /api/agents` lists lightweight metadata, and `GET /api/agents/:id` reads one agent. These queries and `GET /api/state` omit terminal output; **`GET /api/agents/:id/output` still reads the recent raw ANSI tail** (up to 80,000 characters) when needed. Interactive source remains excluded from lists/state and is available through the full card endpoint. Browser SSE/terminal replay and saved output are unchanged.

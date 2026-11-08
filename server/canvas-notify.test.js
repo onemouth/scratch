@@ -105,7 +105,7 @@ nativeTest('semaphore notifications reach two independent processes and preserve
   }
 });
 
-nativeTest('HTTP runtime transitions publish immediately; Resume changes public generation and cleans old channel', async () => {
+nativeTest('SHM telemetry runtime transitions publish immediately; Resume changes public generation and cleans old channel', async () => {
   const children = [];
   const app = createApp({ port: 0, sharedMemory: true, spawnAgent: (_bin, _args, options) => {
     const child = new EventEmitter();
@@ -113,7 +113,7 @@ nativeTest('HTTP runtime transitions publish immediately; Resume changes public 
       write() {}, resize() {}, kill: () => child.emit('exit', { exitCode: 0 }) });
     children.push(child); return child;
   } });
-  let reader;
+  let reader, telemetry;
   try {
     await app.listen();
     const base = `http://127.0.0.1:${app.server.address().port}/api`;
@@ -127,9 +127,12 @@ nativeTest('HTTP runtime transitions publish immediately; Resume changes public 
     const channel = children[0].options.env.AGENT_CANVAS_SHM_NOTIFY;
     assert.ok(channel.startsWith('/scsh-'));
     assert.notEqual(original, children[0].options.env.AGENT_CANVAS_RUN);
-    for (const [index, state] of ['working', 'idle', 'working'].entries()) {
-      await post(`/agents/${agent.id}/activity`, { runToken: children[0].options.env.AGENT_CANVAS_RUN, state, seq: index + 1 });
-    }
+    const { createCanvasTelemetryClient } = await import('./canvas-telemetry-client.js');
+    telemetry = createCanvasTelemetryClient({ config: JSON.parse(children[0].options.env.AGENT_CANVAS_SHM_TELEMETRY), name: app.sharedMemory.name, epoch: app.sharedMemory.epoch });
+    let sent;
+    for (const state of ['working', 'idle', 'working']) sent = telemetry.send('activity', { state });
+    for (let i = 0; i < 200 && telemetry.status(sent.seq).status === 'queued'; i++) { await delay(10); telemetry.drain(); }
+    assert.equal(telemetry.status(sent.seq).status, 'applied');
     assert.deepEqual(reader.read().events.slice(-3).map(event => event.type), ['working', 'idle', 'working']);
     await post(`/agents/${agent.id}/stop`);
     assert.equal(reader.read().events.at(-1).type, 'stopped');
@@ -139,7 +142,7 @@ nativeTest('HTTP runtime transitions publish immediately; Resume changes public 
     assert.equal(snapshot.events.at(-1).type, 'started');
     assert.notEqual(snapshot.agents[0].processGeneration, original);
     assert.notEqual(children[1].options.env.AGENT_CANVAS_SHM_NOTIFY, channel);
-  } finally { reader?.close(); await app.close(); }
+  } finally { telemetry?.close(); reader?.close(); await app.close(); }
 });
 
 nativeTest('blocked semaphore listeners do not occupy the libuv pool; close and environment teardown are safe', async () => {

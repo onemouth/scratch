@@ -5,6 +5,7 @@ import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { createApp } from './index.js';
+import { createCanvasTelemetryClient } from './canvas-telemetry-client.js';
 import { createCanvasMemory, canvasMemoryProjection } from './canvas-memory.js';
 import { openCanvasMemory, nativeMemory } from '../shared/canvas-memory.js';
 import canvasMemoryExtension, { canvasReadTool } from './pi-canvas-memory.js';
@@ -21,7 +22,7 @@ nativeTest('Scratch publishes isolated state and passes a read-only memory tool 
       write() {}, resize() {}, kill: () => child.emit('exit', { exitCode: 0 }) });
     children.push(child); return child;
   } });
-  let reader;
+  let reader, telemetry;
   try {
     await app.listen();
     const base = `http://127.0.0.1:${app.server.address().port}/api`;
@@ -38,7 +39,10 @@ nativeTest('Scratch publishes isolated state and passes a read-only memory tool 
     const note = await request('/notes', { title: 'Note', text: 'Visible note' });
     child.emit('data', '\u001b[31mPRIVATE TERMINAL\u001b[0m');
     // Activity reports publish immediately, including preceding metadata changes.
-    await request(`/agents/${agent.id}/activity`, { runToken: child.options.env.AGENT_CANVAS_RUN, seq: 1, state: 'working' });
+    telemetry = createCanvasTelemetryClient({ config: JSON.parse(child.options.env.AGENT_CANVAS_SHM_TELEMETRY), name, epoch });
+    const sent = telemetry.send('activity', { state: 'working' });
+    for (let i = 0; i < 200 && telemetry.status(sent.seq).status === 'queued'; i++) { await new Promise(resolve => setTimeout(resolve, 10)); telemetry.drain(); }
+    assert.equal(telemetry.status(sent.seq).status, 'applied');
     reader = openCanvasMemory(name, epoch);
     const snapshot = reader.read(), raw = JSON.stringify(snapshot);
     assert.equal(snapshot.agents[0].activity, 'working');
@@ -53,7 +57,7 @@ nativeTest('Scratch publishes isolated state and passes a read-only memory tool 
     assert.equal(JSON.parse(result.content[0].text).sections.agents.items[0].name, 'Shared fixture');
     await app.close();
     assert.throws(() => reader.read(), { code: 'SHM_CLOSED' });
-  } finally { reader?.close(); await app.close(); }
+  } finally { telemetry?.close(); reader?.close(); await app.close(); }
 });
 
 nativeTest('publisher rejects overflow without serving stale state, recovers on smaller update, and never follows another generation', () => {

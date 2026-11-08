@@ -31,7 +31,7 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     await writeFile(join(sessionsRoot, 'project', name), JSON.stringify({ type: 'session', cwd: process.cwd() }) + '\n' + '{"type":"message","message":{"content":"not read"}}\n');
   }
   await writeFile(join(sessionsRoot, 'project', 'invalid.jsonl'), 'not json\n');
-  const app = createApp({ port: 0, spawnAgent: fakeSpawn, sessionsRoot });
+  const app = createApp({ port: 0, sharedMemory: false, spawnAgent: fakeSpawn, sessionsRoot });
   await app.listen();
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const request = async (path, method = 'GET', body) => {
