@@ -9,6 +9,7 @@ import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { queryFixture } from './query-fixture.js';
 import { testCanvasLayout } from './canvas-layout-browser.mjs';
+import { testAgentInbox } from './agent-inbox-browser.mjs';
 // All servers, data, PTYs and browser profiles below belong to this fixture.
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const require = createRequire(join(root,'package.json'));
@@ -409,6 +410,8 @@ try {
  await send('Input.dispatchMouseEvent',{type:'mouseWheel',...maxWheelPoint,deltaX:0,deltaY:100});
  await wait('window.fixtureMessages.some(value=>value?.scrollFixture&&value.top===320)');
  console.log('Interactive metadata read/edit overflow and real wheel scrolling at canvas zoom and maximized size passed');
+ await testAgentInbox({ app, api, ev, send, wait, delay, boxAgentId: boxAgent.id });
+ assert.deepEqual(errors, [], 'No browser runtime errors, including Inbox');
  }
 }finally{
  ws?.close();if(chrome?.pid&&chrome.exitCode===null&&chrome.signalCode===null){const exited=new Promise(r=>chrome.once('exit',r));chrome.kill('SIGTERM');await Promise.race([exited,delay(3000)]);if(chrome.exitCode===null&&chrome.signalCode===null){chrome.kill('SIGKILL');await exited;}}

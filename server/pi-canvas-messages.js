@@ -17,6 +17,17 @@ export default function canvasMessagesExtension(pi) {
     broker = bindMessageProcess({ config, name, epoch, pi, ctx, owner });
   });
   pi.on('session_shutdown', (event = { reason: 'quit' }) => detachMessageProcess(broker, owner, event.reason));
+  // Observe only this binding's model context. Neither handoff nor working/idle
+  // proves a specific message entered a request. Errors/abort do not consume it.
+  pi.on('context_with_system', event => {
+    if (broker?.binding?.owner === owner) broker.client.observeContext?.(event.messages);
+  });
+  pi.on('before_provider_request', event => {
+    if (broker?.binding?.owner === owner) broker.client.observeInboxRequest?.(event.payload);
+  });
+  for (const type of ['message_update', 'message_end']) pi.on(type, event => {
+    if (broker?.binding?.owner === owner) broker.client.observeResponse?.({ ...event, type });
+  });
   pi.registerTool({
     name: 'canvas_send_message', label: 'Send Canvas agent message',
     description: 'Enqueue a message through your SHM outbox; Scratch validates/routes it to another running Agent. No HTTP or terminal paste. ' +

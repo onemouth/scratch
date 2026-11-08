@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { INBOX_VERSION, createInboxObserver } from '../shared/canvas-inbox.js';
 import { openCanvasMemory, transientMemoryError } from '../shared/canvas-memory.js';
 import { MESSAGE_VERSION, QUEUE_SLOTS, MAX_TTL_MS, messagingNative, messageQueue, validateSend, messageError, validMessageId, validId } from '../shared/canvas-messages.js';
 
@@ -8,6 +9,13 @@ export function createCanvasMessageClient({ config, name, epoch, deliver, onRece
   native = messagingNative(), open = openCanvasMemory, watchdogMs = 1000, now = Date.now, canDeliver = () => true, onResume = () => {} }) {
   if (config?.version !== MESSAGE_VERSION || config.epoch !== epoch) throw messageError('SHM_VERSION', 'Incompatible messaging generation');
   const resources = [], queues = {}, history = new Map();
+  const inbox = config.inboxVersion === INBOX_VERSION ? createInboxObserver() : null;
+  const flushInbox = () => {
+    while (inbox && queues.acks.used < QUEUE_SLOTS) {
+      const report = inbox.report(); if (!report) break;
+      queues.acks.push(report); inbox.committed(report);
+    }
+  };
   let closed = false, paused = false, pauseCode, fenced = false, draining = false, timer, watcher, tx;
   const read = () => { const reader = open(name, epoch); try { return reader.read(); } finally { reader.close(); } };
   const wake = () => {
@@ -58,13 +66,15 @@ export function createCanvasMessageClient({ config, name, epoch, deliver, onRece
         let status = 'delivered';
         if (frame.expiresAt <= now()) status = 'expired';
         else {
-          try { deliver(frame); }
+          try { inbox?.track(frame); deliver(frame); }
           catch { status = 'unknown'; } // Do not retry a possibly partially successful handoff.
         }
         queues.acks.push({ sourceId: frame.sourceId, sourceGeneration: frame.sourceGeneration, messageId: frame.messageId, status });
         queues.inbox.shift(entry.sequence); changed = true;
       }
-      if (changed) wake();
+      const before = queues.acks.used;
+      flushInbox();
+      if (changed || queues.acks.used !== before) wake();
       if (resumed) onResume();
     } catch (error) { fail(error); }
     finally { draining = false; }
@@ -107,6 +117,10 @@ export function createCanvasMessageClient({ config, name, epoch, deliver, onRece
       if ((closed || fenced || paused) && ['queued', 'accepted'].includes(last.status)) return { ...last, lastKnownStatus: last.status, status: 'unknown', code: closed ? 'MESSAGE_CHANNEL_CLOSED' : fenced ? 'MESSAGE_CHANNEL_FENCED' : pauseCode };
       return { ...last };
     },
+    observeContext(messages) { inbox?.context(messages); },
+    observeInboxRequest(payload) { inbox?.request(payload); },
+    observeResponse(event) { if (inbox?.response(event)) drain(); },
+    resetInboxContext() { inbox?.resetContext(); },
     drain, close, get closed() { return closed; }, get paused() { return paused; }, get fenced() { return fenced; },
   };
 }

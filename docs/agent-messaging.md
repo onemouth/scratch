@@ -43,6 +43,10 @@ Delivered does **not** prove the model read/understood/answered the message, the
 
 Receipts update in the background; source-side alerts are UI-only, never model wakes. Read a receipt when needed, not in a model polling loop. The process-scoped client remembers the latest 64 message IDs in memory across session changes/reload; older/missing IDs return unknown/MESSAGE_HISTORY_MISSING. Timeout may race a completed handoff, so Scratch reports unknown/MESSAGE_ACK_TIMEOUT rather than claiming non-delivery. A late ack never automatically resends the payload.
 
+## Pending inbox view
+
+The [read-only pending inbox](agent-inbox.md) is a separate ephemeral projection. `delivered` is a handoff receipt and does not remove its row. Exact model-context/outgoing-payload observation followed by response evidence removes it; failures before response and unrelated work do not. Reading the popover never wakes, acknowledges, replies or replays. Sender receipt semantics remain about transport handoff, not inclusion or completion.
+
 ## Bounds and protocol
 
 Each process gets four independent POSIX shm_open/mmap(MAP_SHARED) SPSC queues, 16 slots each:
@@ -52,7 +56,7 @@ Each process gets four independent POSIX shm_open/mmap(MAP_SHARED) SPSC queues, 
 - Delivery acks: Agent producer, Scratch consumer, 1 KiB slots.
 - Receipts: Scratch producer, Agent consumer, 1 KiB slots.
 
-Ack traffic cannot be blocked behind send traffic. Scratch reserves a terminal receipt credit for every accepted message; receipt backpressure pauses outbox consumption rather than overwriting data. Full destination mailboxes cause explicit rejection. At most 15 outstanding accepted routes per source, 16 outbox entries, and 16 inbox entries are possible. Empty/oversize/malformed frames are rejected; no shared-memory overwrite policy exists for messages. Latest statuses are not stored in the lossy lifecycle event journal.
+Ack traffic cannot be blocked behind send traffic. Scratch reserves a terminal receipt credit for every accepted message; receipt backpressure pauses outbox consumption rather than overwriting data. Full destination mailboxes cause explicit rejection. At most 15 outstanding accepted routes per source, 16 outbox entries, and 16 inbox entries are possible. Empty/oversize/malformed frames are rejected; no shared-memory overwrite policy exists for messages. Latest statuses are not stored in the lossy lifecycle event journal. Recipients also have a bounded pending projection (64 unresolved rows each / 1024 total); MESSAGE_INBOX_FULL rejects before enqueue, with no silent eviction. Closed unresolved rows count until replacement or node removal. Inbox observation facts/readiness use the recipient ack queue with their own monotonic sequence, at most eight included and eight uncertain IDs per 1 KiB frame; no peer payloads are resent.
 
 Limits: text is nonblank, at most **8000 UTF-8 bytes**, without terminal control characters (newlines/tabs allowed); ttlMs is 1–600000. Each source can accept at most 30 messages/minute. followUp has additional **3/minute per sender and recipient**, and **16 per process lifetime** for both sending and receiving. These finite budgets also apply to wake:false followUps. Ordinary nextTurn messages remain available when a follow-up budget is exhausted. Limits reject with MESSAGE_RATE; there is no scheduled retry. Minute-based rates replenish with time, but the lifetime budgets do not reset within the process.
 
