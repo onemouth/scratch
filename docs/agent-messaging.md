@@ -1,4 +1,4 @@
-# SHM agent-to-agent messaging (experimental)
+# SHM agent-to-agent messaging
 
 Canvas-launched Pi processes can explicitly send peer messages without HTTP or terminal paste. Scratch remains the sole router/validator and the sole writer of Canvas snapshots. Delegation edges never send messages, and no automatic reply policy is installed.
 
@@ -64,7 +64,7 @@ Scratch supplies two independent semaphore names per messaging process: Agent→
 
 Required SHM startup also loads `server/pi-canvas-messages.js` and supplies private `AGENT_CANVAS_SHM_MESSAGES` descriptors. Queue names and payloads are not added to state, SSE snapshots or Canvas JSON/SQLite persistence. After delivery, Pi may record the custom message as ordinary conversation content; the no-persistence promise applies to Scratch's transport, not Pi's conversation history.
 
-No mailbox discovery API is provided. Existing processes do not acquire tools/environment automatically; an explicit user-managed server restart/relaunch is needed to load the feature. There is no HTTP-only mode or HTTP/TTY fallback. POST /api/messages is removed (404); browser terminal input is unaffected.
+Mailbox descriptors are provisioned at process launch, without a discovery API. Tools/environment are process-scoped; changes require an explicit user-managed relaunch. SHM messaging never falls back to HTTP or terminal paste.
 
 **Messages address a Pi process, not a session.** A process-scoped broker retains queues, pending messages, receipt history, duplicate detection and budgets across /reload, /new, /resume and /fork. Extension-runtime shutdown detaches the old Pi API/context without closing the channel. During that handoff gap the client continues collecting receipts but does not consume inbox messages. The new runtime binds its current Pi API/context and drains queued messages, subject to their original deadlines. No process relaunch is needed. Stale runtime cleanup cannot detach the new binding, and stale tool instances cannot send through it.
 

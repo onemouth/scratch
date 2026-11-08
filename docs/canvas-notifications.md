@@ -2,7 +2,7 @@
 
 Agent-to-agent message payloads use separate bounded queues and private semaphore channels, not this lossy event journal. See [messaging](agent-messaging.md).
 
-Pi agents no longer need to block on a wait request to learn about another agent. The required shared-memory extension provides `canvas_read`, `canvas_subscribe` and `canvas_unsubscribe`. There is **no canvas_wait tool**. The former HTTP wait endpoint has been removed and returns 404; subscription notifications replace that workflow, not mutation/terminal APIs. External HTTP clients have no blocking wait fallback; the server itself always provisions SHM.
+Canvas-launched Pi processes use `canvas_subscribe` and `canvas_unsubscribe` for future Agent lifecycle/activity/progress events. Registration returns immediately; delivery is UI-only by default and does not wake a model. Use `canvas_read` for current summaries, `canvas_agents` for precise metadata and `canvas_layout` for current geometry/busy observations.
 
 ## Subscribe, return immediately, continue working
 
@@ -31,9 +31,9 @@ canvas_unsubscribe({ subscriptionId: "<returned id>" })
 canvas_unsubscribe({ subscriptionId: "*" }) // this Pi session only
 ```
 
-Events: `started`, `working`, `idle`, `stopped`, `removed`, `progress`. This first notification phase covers **Agent lifecycle/activity/progress notes**, not arbitrary card/note/layout events. Only future events after registration are delivered: subscribing to an already-idle agent does not fabricate a completion event. Use canvas_read for current state. An idle event is not proof of task success. `initial:true` marks an activity transition from unknown (for example an initial startup report), not completed work.
+Events: `started`, `working`, `idle`, `stopped`, `removed`, `progress`. Subscriptions cover **Agent lifecycle/activity/progress notes**, not arbitrary card/note/layout events. Only future events after registration are delivered: subscribing to an already-idle agent does not fabricate a completion event. Use canvas_read for current state. An idle event is not proof of task success. `initial:true` marks an activity transition from unknown (for example an initial startup report), not completed work.
 
-The target must exist at subscription time. By default subscriptions follow the logical agent ID across stop/resume, explicitly reported as scope `agent-id-across-restarts`; each event includes a public process generation when available. Optional `generation` filters for exact equality, reported as scope `process-generation`. The old HTTP callback run-token mechanism is removed. A new **server epoch** is never silently followed.
+The target must exist at subscription time. By default subscriptions follow the logical agent ID across stop/resume, explicitly reported as scope `agent-id-across-restarts`; each event includes a public process generation when available. Optional `generation` filters for exact equality, reported as scope `process-generation`. A new **server epoch** is never silently followed.
 
 Delivery modes:
 
@@ -43,7 +43,7 @@ Delivery modes:
 
 Do not subscribe agents to automatically wake each other in a cycle. Prefer UI-only or nextTurn delivery. Peer names/progress are untrusted data, not instructions, and custom messages identify their source rather than impersonating human input. A result with `active:false` can mean a once-only event was already delivered during registration.
 
-Subscriptions are bounded to 32 per Pi session, not persisted, and are closed on unsubscribe/session shutdown/reload/replacement. Restarting a Pi does not replay subscription work. Abort of the subscribe tool cancels registration before it starts, not an already-established subscription; use unsubscribe afterwards. No polling/wait tool blocks an LLM call.
+Subscriptions are bounded to 32 per Pi session, not persisted, and are closed on unsubscribe/session shutdown/reload/replacement. Restarting a Pi does not replay subscription work. Abort of the subscribe tool cancels registration before it starts, not an already-established subscription; use unsubscribe afterwards. Event delivery runs in the background.
 
 ## SHM facts, semaphore wakeups
 
@@ -61,7 +61,7 @@ A once-per-second watchdog checks SHM liveness and can drain a missed hint; it i
 
 If the cursor falls behind overwritten journal entries, return/report `SHM_EVENTS_LOST`; never silently invent the missing outcome. At most 64 matching deliveries are dispatched per drain; exceeding that stops subscriptions with `SHM_NOTIFICATION_LIMIT`. Read current state and explicitly resubscribe. These are bounded, in-memory, best-effort session notifications, **not durable messages, exactly-once processing, task acknowledgments or task resumption**.
 
-The existing 1 MiB snapshot capacity includes the journal; capacity/serialization failure still invalidates the projection instead of exposing stale state. Graceful server/Pi exits close/unlink owned channels. SIGKILL can leave named semaphore/shared-memory orphans until explicit cleanup; native signalRemove(name) removes an identified orphan semaphore, and remove(name) removes an identified orphan SHM name. Never scan/remove unknown or active sessions' objects. Same-user programs are not security-isolated. macOS arm64 is exercised locally; Linux remains a target requiring platform validation.
+The default 1 MiB snapshot capacity includes the journal; capacity/serialization failure still invalidates the projection instead of exposing stale state. Graceful server/Pi exits close/unlink owned channels. SIGKILL can leave named semaphore/shared-memory orphans until explicit cleanup; native signalRemove(name) removes an identified orphan semaphore, and remove(name) removes an identified orphan SHM name. Never scan/remove unknown or active sessions' objects. Same-user programs are not security-isolated. macOS arm64 is exercised locally; Linux remains a target requiring platform validation.
 
 ## Tests
 
@@ -69,4 +69,4 @@ The existing 1 MiB snapshot capacity includes the journal; capacity/serializatio
 - `npm run test:shm`: builds and requires all native snapshot/notification tests.
 - `npm run test:shm:pi`: the isolated reader/notification stage registers production tools, reads SHM with HTTP forbidden, then receives a real semaphore-triggered idle event; no LLM call or saved session. The separate messaging stage checks process-scoped delivery across session transitions using disposable fixture sessions. Neither stage touches live Canvas or user persistence.
 
-Rebuilds and tests must run sequentially; do not rebuild the native binary while new processes are trying to load it. Existing live processes do not hot-acquire notification tools/channels. Do not restart other agents or services automatically.
+Rebuilds and tests must run sequentially; do not rebuild the native binary while new processes are trying to load it. Tools and channels are configured at Pi process launch. Do not restart other agents or services automatically.

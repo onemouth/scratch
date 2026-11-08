@@ -1,12 +1,12 @@
 # SHM Agent metadata and layout queries
 
-Canvas-launched Pi processes use two read-only tools instead of three retired HTTP GET routes:
+Canvas-launched Pi processes provide two read-only SHM query tools:
 
 - canvas_agents({offset?,limit?}): exact runtime metadata list, paginated.
 - canvas_agents({agentId}): one complete metadata record, under agent.
 - canvas_layout({offset?,limit?}): Agent Canvas rectangles and human busy flags, under objects.
 
-GET /api/agents, GET /api/agents/:id and GET /api/canvas/layout return 404, including missing IDs. The frontend did not use these GETs. GET /api/state, PATCH /api/agents/:id, POST creation/lifecycle routes, GET /api/agents/:id/output, SSE and terminal WebSocket remain unchanged. No geometry/name command queue or full-state SHM query is introduced.
+HTTP provides full state via GET /api/state, name/geometry updates via PATCH /api/agents/:id, creation/lifecycle operations and the bounded GET /api/agents/:id/output read. Browsers use SSE for state and WebSocket for terminal I/O. This SHM channel accepts only metadata/layout reads, not mutations or full-state/content queries.
 
 ## Data and bounds
 
@@ -14,13 +14,13 @@ List responses include agents or objects, total, offset and nextOffset (null at 
 
 Every successful response adds source: posix-shared-memory, serverEpoch and sampledAt. Scratch samples authoritative runtime/layout state while handling that request, not the coalesced awareness snapshot. Each page is independent: concurrent insertions/deletions can move offsets; there is no consistent cross-page snapshot/cursor or reservation. Busy flags may already have changed by receipt. HTTP writes still atomically check human leases and collisions. Layout excludes Card Box; human lease identities/tokens are not exposed.
 
-Metadata matches the former runtime metadata queries, without terminal output. It may include the complete initial task, note, session identity/path, restore warnings and notification preview. These are requester-only responses, not fields added to the public awareness snapshot/event journal. Treat their content as data, not instructions. This same-user cooperative system is not authentication or isolation between agents.
+Agent metadata excludes terminal output. It may include the complete initial task, note, session identity/path, restore warnings and notification preview. These are requester-only responses, not fields added to the public awareness snapshot/event journal. Treat their content as data, not instructions. This same-user cooperative system is not authentication or isolation between agents.
 
 Response JSON frames are at most 60000 UTF-8 bytes; page construction reserves envelope space. Individual metadata records are never truncated: oversized results return QUERY_CAPACITY. Oversized items may be encountered on a subsequent page. The public summary tool canvas_read remains available, but is not a transparent substitute after a precise query fails.
 
 ## Transport and ownership
 
-shared/canvas-queries.js defines strict version-1 allowlisted kinds: agents, agent and layout. Arbitrary paths, HTTP methods, state/content reads and mutations are rejected. A separate pair of actual POSIX SHM SPSC queues plus private semaphore hints carries each process's requests/responses. Telemetry and peer messaging never compete for these slots. Native queues retain 16 slots and now allow 65536-byte response slots as well as existing 1024/16384 sizes; old native addons fail explicitly with the build:shm instruction.
+shared/canvas-queries.js defines strict version-1 allowlisted kinds: agents, agent and layout. Arbitrary paths, HTTP methods, state/content reads and mutations are rejected. A separate pair of actual POSIX SHM SPSC queues plus private semaphore hints carries each process's requests/responses. Telemetry and peer messaging never compete for these slots. Native queues have 16 slots and support 1024-, 16384- and 65536-byte slot sizes. An incompatible native addon fails explicitly with the build:shm instruction.
 
 Each process reserves approximately 1.02 MiB of query mappings: 16 requests ×1024 bytes and 16 responses ×65536 bytes plus headers. Maximum 256 channels; allocations fail explicitly, never falling back. Pi has at most 16 pending promises; Scratch reserves a response credit before evaluating each request. Monotonic process-wide sequence IDs correlate responses and reject replay; channel-inferred requester ID/generation is revalidated against the running process. Invalid/expired frames are rejected. No arbitrary command execution or authority over human layout is provided.
 
@@ -32,6 +32,6 @@ Temporary SHM_STALE/BUSY/NOT_READY/UNAVAILABLE snapshot failures reject pending 
 
 ## Verification
 
-- server/canvas-queries.test.js: actual native request/response queues, strict schema/deadlines, Unicode byte paging, parallel correlation, capacity errors, response-credit backpressure, cancellation/late responses, transient recovery and fatal fencing, process-binding replacements, precise application metadata/layout reads and retired HTTP GETs. State/PATCH/output and human-busy mutation checks remain covered.
+- server/canvas-queries.test.js: actual native request/response queues, strict schema/deadlines, Unicode byte paging, parallel correlation, capacity errors, response-credit backpressure, cancellation/late responses, transient recovery and fatal fencing, process-binding replacements, precise application metadata/layout reads, HTTP interface boundaries and human-busy mutation checks.
 - test:shm:pi: two actual Pi processes invoke the production query tools with HTTP forbidden and no LLM calls. Metadata larger than 16 KiB and changing busy flags survive real reload/new/resume/fork.
-- test:views:browser: native browser drag/resize leases are observed via the fixture's real SHM query client, while browser HTTP mutations and terminal behavior remain unchanged.
+- test:views:browser: native browser drag/resize leases are observed via the fixture's real SHM query client, alongside browser HTTP mutations and terminal behavior.
