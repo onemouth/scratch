@@ -19,30 +19,6 @@ export function createCanvasOperations({
   const result = (status, value) => ({ status, value });
   const validCardPlacementValue = (id, key, value) => ['x', 'y', 'width', 'height'].includes(key) && Number.isFinite(value) &&
     (!['width', 'height'].includes(key) || value >= (key === 'width' && getCards().get(id).type === 'interactive' ? 320 : 240));
-  const sendMessage = (body) => {
-    if ((body.toId === undefined) === (body.toName === undefined)) throw new Error('Specify exactly one of toId or toName');
-    let target;
-    if (body.toId !== undefined) {
-      if (!validText(body.toId, 100)) throw new Error('toId must be a non-empty agent ID');
-      target = requireAgent(body.toId);
-    } else {
-      if (!validText(body.toName, 100)) throw new Error('toName must be a non-empty agent name');
-      const matches = [...agents.values()].filter(agent => agent.name === body.toName);
-      if (!matches.length) throw Object.assign(new Error('Agent not found'), { status: 404 });
-      if (matches.length > 1) throw Object.assign(new Error('Agent name is ambiguous; use toId'), { status: 409 });
-      target = matches[0];
-    }
-    if (!validText(body.text, 10000) || /[\x00-\x08\x0b-\x1f\x7f]/.test(body.text)) {
-      throw new Error('text must be 1–10000 characters without terminal control characters');
-    }
-    const sender = body.fromId === undefined ? null : requireAgent(body.fromId);
-    const child = processes.get(target.id);
-    if (target.status !== 'running' || !child) throw Object.assign(new Error('Target agent is not running'), { status: 409 });
-    const text = sender ? `Canvas message from agent ${sender.id}:\n${body.text}` : body.text;
-    // Bracketed paste keeps embedded newlines from acting as Enter keys; the final CR submits the prompt.
-    child.write(`\x1b[200~${text}\x1b[201~\r`);
-    return { ok: true, targetId: target.id, status: 'written-to-tty' };
-  };
   const edgeLabel = (value) => {
     if (typeof value !== 'string' || !validText(value, 120)) throw new Error('label must be 1–120 characters');
     return value.trim();
@@ -87,18 +63,14 @@ export function createCanvasOperations({
     return agent;
   };
 
-  return async ({ path, method, body = {}, query = new URLSearchParams(), humanLayout = false, signal }) => {
+  return async ({ path, method, body = {}, query = new URLSearchParams(), humanLayout = false }) => {
     if (isUnavailable()) return result(503, { error: 'Canvas is shutting down or resetting' });
     const cards = getCards(), views = getViews();
     const mediaSlot = path.match(new RegExp('^/api/cards/([^/]+)/media/(image|audio)$'));
-    if (path === '/api/agents' && method === 'GET') return result(200, { agents: runtime.list() });
-    const agentRead = path.match(/^\/api\/agents\/([^/]+)(?:\/(output|wait))?$/);
-    if (agentRead && method === 'GET' && agentRead[2] !== 'wait') return result(200, agentRead[2] === 'output' ? runtime.read(agentRead[1]) : runtime.get(agentRead[1]));
-    if (agentRead?.[2] === 'wait' && method === 'POST') {
-      if (Object.keys(body).some(key => key !== 'timeoutMs')) throw new Error('Wait accepts only timeoutMs');
-      return result(200, await runtime.wait(agentRead[1], body.timeoutMs, signal));
-    }
-    if (path === '/api/canvas/layout' && method === 'GET') return result(200, canvasLayout.snapshot());
+    const outputRead = path.match(/^\/api\/agents\/([^/]+)\/output$/);
+    if (outputRead && method === 'GET') return result(200, runtime.read(outputRead[1]));
+    // Precise metadata/layout reads are SHM-only; /state and PATCH stay HTTP.
+    if (method === 'GET' && (path === '/api/agents' || /^\/api\/agents\/[^/]+$/.test(path) || path === '/api/canvas/layout')) return result(404, { error: 'Not found' });
     const interactionMatch = path.match(/^\/api\/canvas\/layout-interactions\/(agent|note|card)\/([^/]+)$/);
     if (interactionMatch && method === 'POST') {
       if (!humanLayout) return result(403, { error: 'Layout interactions are reserved for browser gestures' });
@@ -255,12 +227,7 @@ export function createCanvasOperations({
       if (hasLayout(body) && !humanLayout) canvasLayout.assertAvailable({ ...placement, ...updates }, { kind: 'card', id: placement.id });
       Object.assign(placement, updates); broadcast(); return result(200, placement);
     }
-    const sessionMatch = path.match(/^\/api\/agents\/([^/]+)\/session$/);
-    if (sessionMatch && method === 'POST') return result(200, runtime.reportSession(sessionMatch[1], body));
-    const activityMatch = path.match(/^\/api\/agents\/([^/]+)\/activity$/);
-    if (activityMatch && method === 'POST') return result(200, runtime.reportActivity(activityMatch[1], body));
     if (path === '/api/agents' && method === 'POST') return result(201, createAgent(body, 'agents', humanLayout));
-    if (path === '/api/messages' && method === 'POST') return result(202, sendMessage(body));
     const noteMatch = path.match(/^\/api\/notes\/([^/]+)$/);
     if ((path === '/api/notes' && method === 'POST') || (noteMatch && ['PATCH', 'DELETE'].includes(method))) {
       const existing = noteMatch ? notes.get(noteMatch[1]) : null;
@@ -325,14 +292,11 @@ export function createCanvasOperations({
         return result(200, { ok: true });
       }
       if (!match[2] && method === 'PATCH') {
+        if (body.note !== undefined) throw new Error('Agent progress is SHM-only; use canvas_set_progress');
         const updates = {};
         if (body.name !== undefined) {
           if (!validText(body.name, 100)) throw new Error('name must be 1–100 characters');
           updates.name = body.name.trim();
-        }
-        if (body.note !== undefined) {
-          if (typeof body.note !== 'string' || body.note.length > 500) throw new Error('note must be at most 500 characters');
-          updates.note = body.note;
         }
         for (const key of ['x', 'y', 'width', 'height']) {
           if (body[key] !== undefined) {

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { createApp } from './index.js';
+import { reportTelemetry } from '../scripts/tests/telemetry-fixture.js';
 
 function spawner() {
   const children = [];
@@ -32,10 +33,9 @@ test('autosave, exact session restore, stopped nodes, session switches, reset an
     await app.listen();
     const parent = (await request(app, '/agents', { name: 'A', workdir: dir, task: 'DO NOT REPLAY' })).data;
     const child = (await request(app, '/agents', { name: 'B', workdir: dir, parentId: parent.id })).data;
-    const token = one.children[0].options.env.AGENT_CANVAS_RUN;
-    assert.equal((await request(app, `/agents/${parent.id}/session`, { runToken: 'stale', sessionId: 'session-1', sessionFile: session })).status, 409);
-    assert.equal((await request(app, `/agents/${parent.id}/session`, { runToken: token, sessionId: 'session-1', sessionFile: session })).status, 200);
-    assert.equal((await request(app, `/agents/${parent.id}/activity`, { runToken: token, state: 'working', seq: 1 })).status, 200);
+    assert.equal((await request(app, `/agents/${parent.id}/session`, { sessionId: 'session-1', sessionFile: session })).status, 404);
+    await reportTelemetry(one.children[0], 'session', { sessionId: 'session-1', sessionFile: session });
+    await reportTelemetry(one.children[0], 'activity', { state: 'working' });
     assert.equal(app.snapshot().agents[0].activity, 'working');
     await request(app, `/agents/${child.id}/stop`, {});
     await request(app, '/notes', { title: 'Plan', text: 'Keep this', x: 40, y: 70 });
@@ -66,7 +66,7 @@ test('autosave, exact session restore, stopped nodes, session switches, reset an
     assert.equal(app.snapshot().agents.length, 0);
     assert.equal(app.snapshot().notes.length, 0);
     assert.equal(app.snapshot().edges.length, 0);
-    assert.equal((await request(app, `/agents/${parent.id}/session`, { runToken: token, sessionId: 'session-1', sessionFile: session })).status, 404);
+    assert.equal((await request(app, `/agents/${parent.id}/session`, { sessionId: 'session-1', sessionFile: session })).status, 404);
     assert.ok(await readFile(session, 'utf8'));
     await app.close();
     app = createApp({ port: 0, stateFile: file, spawnAgent: two.spawn });

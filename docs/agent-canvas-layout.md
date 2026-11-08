@@ -4,7 +4,7 @@ Agents may place and resize **any Agent Canvas agent, sticky note or card placem
 
 ## Read geometry
 
-`GET /api/canvas/layout` returns `{objects:[{kind,id,x,y,width,height,busy}]}`. Kinds are `agent`, `note`, and `card`; card IDs identify the Agent Canvas placement, not a Card Box view placement. The Card Box agent is excluded. Geometry is in unzoomed **canvas units**, not screen pixels. Negative positions are valid. Use this endpoint instead of inferring coordinates from screenshots or reading persistence files.
+canvas_layout({offset?,limit?}) returns {objects:[{kind,id,x,y,width,height,busy}],total,offset,nextOffset,source,serverEpoch,sampledAt} through dedicated SHM request/response queues. Default limit 20, maximum 100; follow nextOffset. Each page is an independent observation, not a reservation. Kinds are `agent`, `note`, and `card`; card IDs identify the Agent Canvas placement, not a Card Box view placement. The Card Box agent is excluded. Geometry is in unzoomed **canvas units**, not screen pixels. Negative positions are valid. Use this tool instead of inferring coordinates from screenshots or reading persistence files.
 
 ## Create with optional geometry
 
@@ -63,7 +63,7 @@ An ongoing human drag or resize of the target returns 409:
 {"error":"A human is moving or resizing this object; retry later","code":"LAYOUT_BUSY","object":{"kind":"note","id":"…"}}
 ```
 
-Read fresh geometry and choose a different position or retry after the gesture ends. Rejections leave geometry and any combined metadata unchanged. Rejected card creation does not create a library card/view membership, and rejected agent creation does not spawn a PTY or create a delegation edge. No automatic retry, movement to a nearby slot, or confirmation UI is added.
+Read fresh geometry and choose a different position or retry after the gesture ends. Rejections leave geometry and any combined metadata unchanged. Rejected card creation does not create a library card/view membership, and rejected agent creation does not spawn a PTY or create a delegation edge. The server does not automatically retry or move objects to a nearby slot.
 
 ## Human browser transport
 
@@ -71,4 +71,4 @@ Humans remain free to overlap objects. Browser requests explicitly send `X-Canva
 
 During an Agent Canvas drag/resize, the browser calls `POST /api/canvas/layout-interactions/:kind/:id` with the human header and `{owner,action:"start"|"renew"|"end"}`. Each gesture has a random owner, renews every 3 seconds, and holds its lease until the final geometry write completes. Separate tabs' owners coexist; one tab cannot accidentally release another's gesture. Abandoned leases expire after 10 seconds and are never persisted. Protection begins when the server receives the start notification; it cannot protect against requests arriving before that notification or during a network outage. Card Box gestures do not take these leases.
 
-No persistence-schema migration is required. Restart the backend after updating it; newly launched/resumed Pi processes receive the updated layout instructions. Do not automatically stop or restart existing agents just to refresh their instructions.
+Canvas-launched Pi processes receive layout instructions through the agent-canvas skill. Do not automatically stop or restart existing agents to refresh instructions.

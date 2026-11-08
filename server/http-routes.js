@@ -40,9 +40,6 @@ export function createHttpHandler({ port, allowedOrigin, snapshot, clients, sess
       return;
     }
     if (url.pathname.startsWith('/api/')) {
-      const controller = new AbortController();
-      const disconnected = () => controller.abort();
-      res.once('close', disconnected);
       try {
         if (isUnavailable()) return reply(res, 503, { error: 'Canvas is shutting down or resetting' });
         // Intent marker, NOT authentication: this loopback API has no auth model.
@@ -74,11 +71,11 @@ export function createHttpHandler({ port, allowedOrigin, snapshot, clients, sess
           if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Expected JSON object');
         }
         if (isUnavailable()) return reply(res, 503, { error: 'Canvas is shutting down or resetting' });
-        const response = await operate({ path: url.pathname, method: req.method, body, query: url.searchParams, humanLayout, signal: controller.signal });
+        const response = await operate({ path: url.pathname, method: req.method, body, query: url.searchParams, humanLayout });
         return reply(res, response.status, response.value);
       } catch (error) {
         return reply(res, error.status || 400, { error: error.message, ...(error.code?.startsWith('LAYOUT_') ? { code: error.code, ...(error.conflicts ? { conflicts: error.conflicts } : {}), ...(error.object ? { object: error.object } : {}) } : {}) });
-      } finally { res.removeListener('close', disconnected); }
+      }
     }
     if (req.method !== 'GET') return reply(res, 405, { error: 'Method not allowed' });
     const file = resolve(dist, `.${url.pathname === '/' ? '/index.html' : url.pathname}`);

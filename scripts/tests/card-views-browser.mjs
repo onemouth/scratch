@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { createServer as httpServer } from 'node:http';
 import { spawn } from 'node:child_process';
 import { EventEmitter } from 'node:events';
+import { queryFixture } from './query-fixture.js';
 import { testCanvasLayout } from './canvas-layout-browser.mjs';
 // All servers, data, PTYs and browser profiles below belong to this fixture.
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -31,9 +32,9 @@ const children=[];
 try {
  const interactiveMediaRoot=join(dir,'media');await mkdir(join(interactiveMediaRoot,'images'),{recursive:true});
  await writeFile(join(interactiveMediaRoot,'images','dot.png'),Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M/wHwAF/gL+AvzZAAAAAElFTkSuQmCC','base64'));
- app=createApp({port:0,publicOrigin:null,stateFile:join(dir,'canvas.json'),cardsFile:join(dir,'cards.sqlite'),interactiveMediaRoot,sessionsRoot:join(dir,'sessions'),spawnAgent(){
+ app=createApp({port:0,publicOrigin:null,stateFile:join(dir,'canvas.json'),cardsFile:join(dir,'cards.sqlite'),interactiveMediaRoot,sessionsRoot:join(dir,'sessions'),spawnAgent(_bin,_args,options){
    const child=new EventEmitter();
-   Object.assign(child,{writes:[],onData:fn=>child.on('data',fn),onExit:fn=>child.on('exit',fn),write(data){this.writes.push(data);this.emit('data',data);},resize(){},kill(){this.emit('exit',{exitCode:0});}});
+   Object.assign(child,{options,writes:[],onData:fn=>child.on('data',fn),onExit:fn=>child.on('exit',fn),write(data){this.writes.push(data);this.emit('data',data);},resize(){},kill(){this.emit('exit',{exitCode:0});}});
    children.push(child);setTimeout(()=>child.emit('data','Fixture terminal ready\r\n'),30);return child;
  }});
  await app.listen();
@@ -47,7 +48,7 @@ try {
  const linkedPeer=await api('/cards','POST',{content:'Fixture 1',tags:['reading'],links:[tagPeer.id],place:false});
  for(let i=2;i<31;i++)await api('/cards','POST',{content:'Fixture '+i,tags:['reading'],place:false});
  const boxAgent=await api('/card-box/agent','POST',{});
- await api('/agents/'+boxAgent.id,'PATCH',{note:'Disposable fixture · echo terminal only · no Pi/model execution'});
+ // The disposable fake PTY never runs Pi or a model; progress is SHM-only.
  const original=app.snapshot().cardBox.activeViewId;
  const config=devServerConfig({PORT:String(app.server.address().port)});
  // Fixture only: permit its ephemeral frontend origin, and show loopback guide URLs.
@@ -78,7 +79,7 @@ try {
  const active=()=>app.snapshot().cardBox.activeViewId;
  const nodeSelector='.react-flow__node-card[data-id="card-box-'+card.id+'"]';
  const libraryClick=(id,selector)=>ev('(()=>{const card=Array.from(document.querySelectorAll(".library-card")).find(node=>node.textContent.includes('+JSON.stringify(id)+'));card.querySelector('+JSON.stringify(selector)+').click()})()');
- await testCanvasLayout({ api, base, ev, send, wait, delay, cardId: card.id });
+ await testCanvasLayout({ api, base, ev, send, wait, delay, cardId: card.id, layout: () => queryFixture(children[0]).query('layout', { limit: 100 }) });
  await click('.workspace-nav button','Card box');
  await wait('!!document.querySelector("[aria-label=\\"Current view\\"]")');
  await ev('window.originalTerminal=document.querySelector(".card-box-agent-sidebar .xterm")');

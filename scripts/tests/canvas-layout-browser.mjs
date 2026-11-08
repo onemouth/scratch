@@ -1,13 +1,13 @@
 import assert from 'node:assert/strict';
 
 // Runs inside the existing isolated browser fixture: no live Canvas data/PTYs.
-export async function testCanvasLayout({ api, base, ev, send, wait, delay, cardId }) {
+export async function testCanvasLayout({ api, base, ev, send, wait, delay, cardId, layout }) {
   const note = await api('/notes', 'POST', { text: 'Layout lease fixture', x: 500, y: 0, width: 200, height: 180 });
   const selectors = [
     { kind: 'note', id: note.id, selector: `.react-flow__node-note[data-id="${note.id}"]`, handle: '.note-drag-handle', path: `/notes/${note.id}` },
     { kind: 'card', id: cardId, selector: `.react-flow__node-card[data-id="${cardId}"]`, handle: '.card-toolbar', path: `/card-placements/${cardId}` },
   ];
-  const busy = async item => (await api('/canvas/layout')).objects.find(o => o.kind === item.kind && o.id === item.id)?.busy;
+  const busy = async item => (await layout()).objects.find(o => o.kind === item.kind && o.id === item.id)?.busy;
   const expectBusy = async (item, value) => {
     for (let i = 0; i < 100; i++) { if (await busy(item) === value) return; await delay(30); }
     assert.fail(`Expected ${item.kind} busy=${value}`);
