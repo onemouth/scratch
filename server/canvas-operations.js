@@ -12,7 +12,7 @@ import { importInteractiveAsset, removeInteractiveAssetFile } from './interactiv
 // parsing, origin policy or terminal protocol belongs in this layer.
 export function createCanvasOperations({
   agents, quietLayoutLaunches, notes, edges, cardPlacements, canvasLayout, terminals,
-  runtime, getCards, getViews, cardsFile, mediaDirectory, interactiveMediaRoot,
+  runtime, getCards, getViews, getInbox, cardsFile, mediaDirectory, interactiveMediaRoot,
   broadcast, flush, publish, isUnavailable, setResetting, cancelSave, getSaveError,
 }) {
   const { processes, startAgent, stopProcesses, requireAgent } = runtime;
@@ -69,6 +69,12 @@ export function createCanvasOperations({
     const mediaSlot = path.match(new RegExp('^/api/cards/([^/]+)/media/(image|audio)$'));
     const outputRead = path.match(/^\/api\/agents\/([^/]+)\/output$/);
     if (outputRead && method === 'GET') return result(200, runtime.read(outputRead[1]));
+    const inboxRead = path.match(/^\/api\/agents\/([^/]+)\/inbox$/);
+    if (inboxRead) {
+      requireAgent(inboxRead[1]);
+      if (method !== 'GET') return result(405, { error: 'Inbox is read-only' });
+      return result(200, getInbox().read(inboxRead[1]));
+    }
     // Precise metadata/layout reads are SHM-only; /state and PATCH stay HTTP.
     if (method === 'GET' && (path === '/api/agents' || /^\/api\/agents\/[^/]+$/.test(path) || path === '/api/canvas/layout')) return result(404, { error: 'Not found' });
     const interactionMatch = path.match(/^\/api\/canvas\/layout-interactions\/(agent|note|card)\/([^/]+)$/);

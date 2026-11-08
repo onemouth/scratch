@@ -1,10 +1,13 @@
 import { memoryName } from '../shared/canvas-memory.js';
+import { INBOX_VERSION } from '../shared/canvas-inbox.js';
+import { createAgentInbox } from './agent-inbox.js';
 import { MESSAGE_VERSION, QUEUE_SLOTS, messagingNative, messageQueue, validateSend, validId, validMessageId, messageError } from '../shared/canvas-messages.js';
 
 // Scratch mediates every message. Independent SPSC queues avoid shared writers;
 // reserved receipt credits ensure that every accepted message can be resolved.
-export function createCanvasMessaging({ epoch, getAgent, onError = console.error, native = messagingNative(), watchdogMs = 1000, now = Date.now }) {
+export function createCanvasMessaging({ epoch, getAgent, onChange = () => {}, onError = console.error, native = messagingNative(), watchdogMs = 1000, now = Date.now }) {
   const channels = new Map();
+  const inbox = createAgentInbox({ getAgent, onChange, now });
   let closed = false;
   const post = channel => {
     try { native.signalPost(channel.rx); }
@@ -14,6 +17,8 @@ export function createCanvasMessaging({ epoch, getAgent, onError = console.error
     source.receipts.push({ messageId, status, ...(code ? { code } : {}), at: now() }); post(source);
   };
   const finish = (source, messageId, status, code) => {
+    const pending = source.pending.get(messageId);
+    if (pending) inbox.handoff(pending.target.id, pending.target.generation, messageId, status);
     receipt(source, messageId, status, code); source.pending.delete(messageId);
   };
   const current = channel => {
@@ -24,7 +29,11 @@ export function createCanvasMessaging({ epoch, getAgent, onError = console.error
     for (let i = 0; i < QUEUE_SLOTS; i++) {
       const entry = target.acks.peek(); if (!entry) break;
       const ack = entry.value;
-      if (ack && validId(ack.sourceId) && validMessageId(ack.messageId) && validId(ack.sourceGeneration) && ['delivered', 'unknown', 'expired'].includes(ack.status)) {
+      if (ack?.kind === 'inbox') inbox.observe(target.id, target.generation, ack);
+      else if (ack && validId(ack.sourceId) && validMessageId(ack.messageId) && validId(ack.sourceGeneration) && ['delivered', 'unknown', 'expired'].includes(ack.status)) {
+        // Late receiver evidence can resolve the UI even after source closure
+        // or ACK_TIMEOUT; it must never manufacture a new sender receipt.
+        inbox.handoff(target.id, target.generation, ack.messageId, ack.status, ack.sourceId, ack.sourceGeneration);
         const source = channels.get(ack.sourceId), pending = source?.pending.get(ack.messageId);
         if (pending?.target === target && pending.sourceGeneration === source.generation && ack.sourceGeneration === source.generation) finish(source, ack.messageId, ack.status);
       }
@@ -55,6 +64,7 @@ export function createCanvasMessaging({ epoch, getAgent, onError = console.error
         if (frame.delivery === 'followUp' && (source.followUpCount >= 16 || target.followUpCountReceived >= 16 || target.incomingFollowUps.length >= 3)) {
           throw messageError('MESSAGE_RATE', 'Follow-up rate or process lifetime budget reached');
         }
+        if (!inbox.capacity(target.id, target.generation)) throw messageError('MESSAGE_INBOX_FULL', 'Target pending inbox capacity reached');
         if (target.inbox.used >= QUEUE_SLOTS) throw messageError('SHM_QUEUE_FULL', 'Target mailbox full');
         source.rate.push(now());
         if (frame.delivery === 'followUp') {
@@ -64,6 +74,7 @@ export function createCanvasMessaging({ epoch, getAgent, onError = console.error
         source.seen.set(id, now() + 660000);
         target.inbox.push({ ...frame, sourceId: source.id, sourceGeneration: source.generation, serverEpoch: epoch });
         committed = true;
+        inbox.add(target.id, target.generation, { ...frame, sourceId: source.id, sourceGeneration: source.generation });
         source.pending.set(id, { target, sourceGeneration: source.generation, expiresAt: frame.expiresAt });
         receipt(source, id, 'accepted'); post(target);
       } catch (error) {
@@ -76,6 +87,7 @@ export function createCanvasMessaging({ epoch, getAgent, onError = console.error
   };
   const drain = () => {
     if (closed) return;
+    inbox.prune();
     // Ack queues are independent: full outboxes cannot deadlock delivery acks.
     for (const channel of [...channels.values()]) {
       try { drainAcks(channel); }
@@ -90,9 +102,10 @@ export function createCanvasMessaging({ epoch, getAgent, onError = console.error
   };
   const timer = setInterval(drain, watchdogMs); timer.unref();
   return {
+    inbox,
     createChannel(id, generation) {
       if (closed || channels.has(id) || channels.size >= 256) throw messageError('MESSAGE_LIMIT', 'Messaging closed or process channel limit reached');
-      const resources = [], config = { version: MESSAGE_VERSION, epoch, id, generation };
+      const resources = [], config = { version: MESSAGE_VERSION, inboxVersion: INBOX_VERSION, epoch, id, generation };
       const channel = { id, generation, pending: new Map(), seen: new Map(), rate: [], wakes: [], incomingFollowUps: [], followUpCount: 0, followUpCountReceived: 0, close() {
         if (channels.get(id) !== channel) return;
         channels.delete(id);
@@ -103,6 +116,7 @@ export function createCanvasMessaging({ epoch, getAgent, onError = console.error
             catch (error) { onError(`Canvas message receipt failed: ${error.code ?? 'MESSAGE_ERROR'}`); }
           }
         }
+        inbox.close(id, generation);
         // Fence data before semaphore close wakes the peer.
         for (const key of ['inbox', 'outbox', 'receipts', 'acks']) channel[key].close();
         for (const dispose of resources.reverse()) dispose();
@@ -117,7 +131,7 @@ export function createCanvasMessaging({ epoch, getAgent, onError = console.error
         const tx = native.signalCreate(config.tx); resources.push(() => native.signalClose(tx));
         channel.rx = native.signalCreate(config.rx); resources.push(() => native.signalClose(channel.rx));
         const watcher = native.signalWatch(config.tx, drain); resources.push(() => native.signalClose(watcher));
-        channel.config = config; channels.set(id, channel); return channel;
+        channel.config = config; channels.set(id, channel); inbox.open(id, generation); return channel;
       } catch (error) { for (const dispose of resources.reverse()) dispose(); throw error; }
     },
     drain,

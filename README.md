@@ -57,6 +57,8 @@ Messaging, telemetry and query queues survive reload/new/resume/fork. Temporary 
 
 HTTP provides full Canvas state (`GET /api/state`), lifecycle/layout/content operations, card source and media. `GET /api/agents/:id/output` reads at most 80,000 raw ANSI terminal characters, not a conversation transcript. State responses omit terminal output; card collections/state omit Interactive source. Browsers use SSE for state updates and WebSocket for terminal I/O.
 
+The Agent header's **pending count** button opens a read-only pending-message popover. Messages stay visible after Pi accepts the handoff and leave only when their exact context/payload is observed in a responding model turn. Viewing never wakes an agent. Unknown/ended processes show unavailable, not an empty success; replacement processes never receive old pending rows. See [pending inbox semantics and limits](docs/agent-inbox.md).
+
 See the [Agent API Guide](docs/agent-api.md), [SHM setup](docs/shared-memory.md), [queries](docs/agent-queries.md), [notifications](docs/canvas-notifications.md), [messaging](docs/agent-messaging.md) and [telemetry](docs/agent-telemetry.md). Do not restart live services or agents automatically.
 
 ## Agent-controlled layout

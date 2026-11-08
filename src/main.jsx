@@ -15,6 +15,7 @@ import { completedAgents, notificationContent } from './agent-notifications.js';
 import { includeCreatedAgent, agentsToFocus } from './agent-state.js';
 import { CardNode, reconcileCardDrafts } from './cards.jsx';
 import { AgentName } from './agent-name.jsx';
+import { AgentInbox } from './agent-inbox.jsx';
 import { beginLayoutInteraction, completeLayoutInteraction, humanLayoutHeaders } from './layout-interaction.js';
 import { CardLibrary, ViewControls } from './card-views.jsx';
 import { mergeViewResponse, mergeViewSnapshot, nodeMeasurement as measuredLike } from './card-view-state.js';
@@ -124,6 +125,7 @@ function AgentNode({ id, data, selected }) {
     {!data.cardBox && <Handle type="target" position={Position.Left} />}
     <header className="node-header">
       <span className="status-dot" /><AgentName id={agent.id} name={agent.name} onError={setError} /><span className="badge">{agent.status}</span>
+      <AgentInbox agentId={agent.id} agentName={agent.name} inbox={agent.inbox} />
       <button type="button" className="icon-btn nodrag" title={data.maximized ? 'Return to whiteboard' : 'Maximize agent'} aria-label={data.maximized ? `Return ${agent.name} to whiteboard` : `Maximize ${agent.name}`} onClick={() => data.onMaximize(data.maximized ? null : id)}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">{data.maximized ? <><path d="M8 4H4v4M16 4h4v4M4 16v4h4M20 16v4h-4" /><rect x="8" y="8" width="8" height="8" /></> : <rect x="4" y="4" width="16" height="16" rx="1" />}</svg></button>
       {data.docked && !data.maximized && <button type="button" className="icon-btn nodrag" title="Hide agent sidebar" aria-label="Hide agent sidebar" onClick={data.onHide}>→</button>}
       {agent.status === 'running' && <button className="icon-btn nodrag" title="Stop agent" aria-label={`Stop ${agent.name}`} onClick={stop}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><path d="M5 5l14 14M19 5L5 19" /></svg></button>}

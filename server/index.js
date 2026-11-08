@@ -61,6 +61,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   const snapshot = (live = true, { includeOutput = true } = {}) => ({
     agents: [...agents.values()].map(agent => live ? {
       ...runtime.describe(agent, { includeOutput }),
+      inbox: messaging?.inbox.summary(agent.id),
       ...(quietLayoutLaunches.has(agent.id) ? { suppressAutoFocus: true } : {}),
     } : agent),
     edges: [...edges.values()], notes: [...notes.values()], cardPlacements: [...cardPlacements.values()],
@@ -106,7 +107,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   const { startAgent, stopProcesses } = runtime;
   const operate = createCanvasOperations({
     agents, quietLayoutLaunches, notes, edges, cardPlacements, canvasLayout, terminals, runtime,
-    getCards: () => cards, getViews: () => views, cardsFile, mediaDirectory, interactiveMediaRoot,
+    getCards: () => cards, getViews: () => views, getInbox: () => messaging?.inbox, cardsFile, mediaDirectory, interactiveMediaRoot,
     broadcast, flush, publish, isUnavailable: () => closing || resetting,
     setResetting: value => { resetting = value; }, cancelSave: () => clearTimeout(saveTimer),
     getSaveError: () => saveError,
@@ -152,7 +153,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
             cards: cards.list({ includeInteractiveSource: false }), cardPlacements: [...cardPlacements.values()] }),
         });
         messaging = createCanvasMessaging({ epoch: memory.epoch,
-          getAgent: id => agents.has(id) ? runtime.describe(agents.get(id)) : null });
+          getAgent: id => agents.has(id) ? runtime.describe(agents.get(id)) : null, onChange: publish });
         telemetry = createCanvasTelemetry({ epoch: memory.epoch, apply: runtime.applyTelemetry });
         queries = createCanvasQueries({ epoch: memory.epoch, execute(id, generation, kind, params) {
           if (closing || resetting) throw queryError('QUERY_UNAVAILABLE', 'Canvas is shutting down or resetting');

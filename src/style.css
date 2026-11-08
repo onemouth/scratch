@@ -238,3 +238,27 @@ button.card-meta-link:hover, button.card-meta-link:focus-visible { background: #
   .view-state { display: none; }
   .library-grid { grid-template-columns: 1fr; }
 }
+
+/* Read-only pending inbox. Portaled so canvas transforms and node clipping do not affect it. */
+.node-header .agent-inbox-trigger { width: auto; min-width: 27px; padding: 0 4px; color: #bdc9de; }
+.node-header .agent-inbox-trigger.unavailable { color: #8190aa; }
+.node-header .agent-inbox-trigger:focus-visible { outline: 2px solid #a5a7fa; outline-offset: 2px; border-radius: 3px; }
+.agent-inbox-count { min-width: 10px; font: 600 11px 'JetBrains Mono', monospace; line-height: 1; text-align: center; }
+.agent-inbox-popover { position: fixed; z-index: 30000; display: flex; flex-direction: column; max-height: calc(100vh - 16px); color: #e7edfa; background: #182235; border: 1px solid #4a5972; border-radius: 9px; box-shadow: 0 16px 50px #000b; font-size: 12px; cursor: default; overflow: hidden; transform: none; }
+.agent-inbox-popover > header { display: flex; flex: none; align-items: center; justify-content: space-between; gap: 12px; padding: 10px 11px; border-bottom: 1px solid #344158; }
+.agent-inbox-popover > header > div { display: flex; min-width: 0; align-items: baseline; gap: 8px; }
+.agent-inbox-popover > header strong { font-size: 13px; }
+.agent-inbox-popover > header small { color: #91a0bb; font: 10px 'JetBrains Mono', monospace; }
+.agent-inbox-popover > header .icon-btn { width: 22px; height: 22px; flex: none; padding: 0; font-size: 18px; }
+.agent-inbox-warning, .agent-inbox-unavailable { flex: none; padding: 8px 11px; border-bottom: 1px solid #3b4658; color: #f0cf91; background: #3b3022; line-height: 1.4; overflow-wrap: anywhere; }
+.agent-inbox-unavailable { color: #d3bd9e; background: #302b27; }
+.agent-inbox-messages { min-height: 56px; overflow: auto; overscroll-behavior: contain; scrollbar-width: thin; scrollbar-color: #53627d #182235; }
+.agent-inbox-state { padding: 16px 12px; color: #a9b6cc; line-height: 1.45; overflow-wrap: anywhere; }
+.agent-inbox-state.error { color: #ffb3ad; }
+.agent-inbox-message { padding: 10px 12px 12px; border-bottom: 1px solid #303d53; }
+.agent-inbox-message:last-child { border-bottom: 0; }
+.agent-inbox-message-meta { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin-bottom: 6px; }
+.agent-inbox-message-meta strong { min-width: 0; overflow: hidden; color: #dce6f8; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.agent-inbox-message-meta span { flex: none; color: #8f9db7; font: 9px 'JetBrains Mono', monospace; }
+.agent-inbox-uncertain { margin: -1px 0 6px; color: #e6bf7a; font: 9px 'JetBrains Mono', monospace; text-transform: uppercase; }
+.agent-inbox-text { max-height: min(32vh, 260px); overflow: auto; overscroll-behavior: contain; color: #d1dcec; line-height: 1.5; white-space: pre-wrap; overflow-wrap: anywhere; word-break: break-word; user-select: text; cursor: text; }
