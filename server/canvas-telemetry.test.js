@@ -111,9 +111,9 @@ nativeTest('post-application failure fences telemetry as unknown, never safe-to-
   try {
     const client = f.client(), sent = client.send('progress', { text: 'Committed' });
     f.pump();
-    assert.equal(applied, true); assert.equal(client.closed, true);
+    assert.equal(applied, true); assert.equal(client.closed, false); assert.equal(client.fenced, true);
     assert.equal(client.status(sent.seq).status, 'unknown');
-    assert.throws(() => client.send('progress', { text: 'No retry' }), errorCode('SHM_CLOSED'));
+    assert.throws(() => client.send('progress', { text: 'No retry' }), errorCode('TELEMETRY_CHANNEL_FENCED'));
   } finally { f.close(); }
 });
 
@@ -122,7 +122,7 @@ nativeTest('SHM telemetry remains process-owned across new/reload/resume/fork; s
   const key = Symbol.for('agent-canvas.telemetry.process.v1');
   const instance = trackerInstance;
   try {
-    Object.assign(process.env, { AGENT_CANVAS_ID: 'a', AGENT_CANVAS_URL: '', AGENT_CANVAS_RUN: '', AGENT_CANVAS_TELEMETRY_TRANSPORT: 'shm',
+    Object.assign(process.env, { AGENT_CANVAS_ID: 'a', AGENT_CANVAS_URL: '',
       AGENT_CANVAS_SHM_TELEMETRY: JSON.stringify(f.channel.config), AGENT_CANVAS_SHM_NAME: f.memory.name, AGENT_CANVAS_SHM_EPOCH: f.memory.epoch });
     globalThis.fetch = () => { throw new Error('HTTP forbidden'); };
     let current = instance();
@@ -183,8 +183,8 @@ nativeTest('wrong server epoch fails before claiming queues; a closed server fen
     assert.throws(() => createCanvasTelemetryClient({ config: { ...f.channel.config, epoch: 'different' }, name: f.memory.name, epoch: 'different' }), errorCode('SHM_VERSION'));
     const client = f.client(), sent = client.send('progress', { text: 'Pending' });
     f.memory.close(); client.drain();
-    assert.equal(client.closed, true); assert.equal(client.status(sent.seq).status, 'unknown');
-    assert.throws(() => client.send('progress', { text: 'No reconnect' }), errorCode('SHM_CLOSED'));
+    assert.equal(client.closed, false); assert.equal(client.fenced, true); assert.equal(client.status(sent.seq).status, 'unknown');
+    assert.throws(() => client.send('progress', { text: 'No reconnect' }), errorCode('TELEMETRY_CHANNEL_FENCED'));
   } finally { f.close(); }
 });
 
@@ -214,7 +214,7 @@ nativeTest('wake refresh samples the current binding, waits for credits, and nev
   const f = fixture(undefined, { now: () => clock ?? Date.now() }), saved = { ...process.env }, originalFetch = globalThis.fetch;
   const key = Symbol.for('agent-canvas.telemetry.process.v1');
   try {
-    Object.assign(process.env, { AGENT_CANVAS_ID: 'a', AGENT_CANVAS_URL: '', AGENT_CANVAS_RUN: '', AGENT_CANVAS_TELEMETRY_TRANSPORT: 'shm',
+    Object.assign(process.env, { AGENT_CANVAS_ID: 'a', AGENT_CANVAS_URL: '',
       AGENT_CANVAS_SHM_TELEMETRY: JSON.stringify(f.channel.config), AGENT_CANVAS_SHM_NAME: f.memory.name, AGENT_CANVAS_SHM_EPOCH: f.memory.epoch });
     globalThis.fetch = () => { throw new Error('HTTP forbidden'); };
     const old = trackerInstance();
@@ -265,6 +265,25 @@ nativeTest('wake refresh samples the current binding, waits for credits, and nev
   } finally { process[key]?.close(); globalThis.fetch = originalFetch; process.env = saved; f.close(); }
 });
 
+nativeTest('transient snapshot failures pause telemetry without closing process resources', () => {
+  for (const code of ['SHM_BUSY', 'SHM_NOT_READY', 'SHM_UNAVAILABLE']) {
+    const f = fixture(); let failure = code;
+    try {
+      const client = f.client({ open: (...args) => {
+        const reader = openCanvasMemory(...args);
+        return { read() { if (failure) throw Object.assign(new Error('Temporary snapshot failure'), { code: failure }); return reader.read(); }, close: () => reader.close() };
+      } });
+      assert.equal(client.closed, false); assert.equal(client.paused, true);
+      assert.throws(() => client.send('progress', { text: 'Not deferred' }), errorCode(code));
+      failure = null; client.drain();
+      assert.equal(client.paused, false);
+      const sent = client.send('progress', { text: 'Fresh after recovery' }); f.pump();
+      assert.equal(client.status(sent.seq).status, 'applied'); assert.equal(f.frames.length, 1);
+      client.close(); assert.equal(client.closed, true);
+    } finally { f.close(); }
+  }
+});
+
 nativeTest('initial stale heartbeat can recover, but closed/replaced/incompatible generations remain fenced', () => {
   for (const failure of ['closed', 'epoch', 'corrupt']) {
     const f = fixture();
@@ -284,9 +303,11 @@ nativeTest('initial stale heartbeat can recover, but closed/replaced/incompatibl
         execFileSync('python3', [new URL('../scripts/tests/shm-corrupt.py', import.meta.url).pathname, 'field', f.memory.name, '5', '0']);
       }
       client.drain();
-      assert.equal(client.closed, true, failure);
+      assert.equal(client.closed, false, failure); assert.equal(client.fenced, true, failure);
+      assert.throws(() => messagingNative().queueOpen(f.channel.config.reports, 'producer'), errorCode('SHM_BUSY'), 'process still owns its original queue claim');
+      f.memory.publish(); client.drain(); assert.equal(client.fenced, true, 'fatal fencing never reconnects');
       assert.equal(client.status(sent.seq).status, 'unknown');
-      assert.throws(() => client.send('progress', { text: 'No reconnect' }), errorCode('SHM_CLOSED'));
+      assert.throws(() => client.send('progress', { text: 'No reconnect' }), errorCode('TELEMETRY_CHANNEL_FENCED'));
     } finally { f.close(); }
   }
 });
@@ -295,10 +316,10 @@ const eventually = async predicate => {
   for (let i = 0; i < 200; i++) { if (predicate()) return; await new Promise(resolve => setTimeout(resolve, 10)); }
   assert.fail('Timed out waiting for native telemetry');
 };
-nativeTest('production runtime receives session/activity/progress, persists metadata only and rejects mixed HTTP reporting', async () => {
+nativeTest('production runtime receives session/activity/progress, persists metadata only, fences older sequences and rejects retired HTTP reporting', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'canvas-telemetry-runtime-')), children = [];
   const file = join(directory, 'canvas.json');
-  const app = createApp({ port: 0, sharedMemory: true, stateFile: file, spawnAgent: (_bin, args, options) => {
+  const app = createApp({ port: 0, stateFile: file, spawnAgent: (_bin, args, options) => {
     const child = new EventEmitter();
     Object.assign(child, { args, options, onData: fn => child.on('data', fn), onExit: fn => child.on('exit', fn), kill: () => child.emit('exit', { exitCode: 0 }) });
     children.push(child); return child;
@@ -310,11 +331,11 @@ nativeTest('production runtime receives session/activity/progress, persists meta
     const request = async (path, body) => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     const agent = await (await request('/agents', { name: 'Telemetry runtime', workdir: directory })).json();
     const env = children[0].options.env, config = JSON.parse(env.AGENT_CANVAS_SHM_TELEMETRY);
-    assert.equal(env.AGENT_CANVAS_TELEMETRY_TRANSPORT, 'shm');
+    assert.equal(env.AGENT_CANVAS_TELEMETRY_TRANSPORT, undefined);
     assert.throws(() => app.runtime.applyTelemetry(agent.id, 'stale-generation', { kind: 'progress', data: { text: 'Spoofed' } }), errorCode('TELEMETRY_GENERATION'));
     assert.equal(app.snapshot().agents[0].note, '');
-    assert.equal((await request(`/agents/${agent.id}/activity`, { runToken: env.AGENT_CANVAS_RUN, state: 'idle', seq: 100 })).status, 409);
-    assert.equal((await request(`/agents/${agent.id}/session`, { runToken: env.AGENT_CANVAS_RUN, sessionFile: null, sessionId: 'mixed' })).status, 409);
+    assert.equal((await request(`/agents/${agent.id}/activity`, { state: 'idle', seq: 100 })).status, 404);
+    assert.equal((await request(`/agents/${agent.id}/session`, { sessionFile: null, sessionId: 'mixed' })).status, 404);
     client = createCanvasTelemetryClient({ config, name: env.AGENT_CANVAS_SHM_NAME, epoch: env.AGENT_CANVAS_SHM_EPOCH });
     client.send('session', { sessionFile: '/private/OWNED_SECRET_SESSION.jsonl', sessionId: 'owned-session' });
     client.send('activity', { state: 'working' });
@@ -326,13 +347,19 @@ nativeTest('production runtime receives session/activity/progress, persists meta
     assert.equal(state.agents[0].notificationSummary, 'Completed via SHM');
     assert.equal(state.agents[0].sessionId, 'owned-session');
     assert.equal(state.agents[0].note, 'Telemetry result 🧋');
+    // Runtime fencing is process-wide across report kinds, not just per-kind.
+    app.runtime.applyTelemetry(agent.id, config.generation, { seq: 2, kind: 'session', data: { sessionFile: null, sessionId: 'late-older' } });
+    app.runtime.applyTelemetry(agent.id, config.generation, { seq: 3, kind: 'progress', data: { text: 'Late overwrite' } });
+    assert.equal(app.snapshot().agents[0].sessionId, 'owned-session');
+    assert.equal(app.snapshot().agents[0].note, 'Telemetry result 🧋');
+    assert.throws(() => app.runtime.applyTelemetry(agent.id, config.generation, { seq: 0, kind: 'activity', data: { state: 'working' } }), /Invalid telemetry sequence/);
     // Progress metadata publication is coalesced; force no new server writes.
     await new Promise(resolve => setTimeout(resolve, 80));
     const reader = openCanvasMemory(env.AGENT_CANVAS_SHM_NAME, env.AGENT_CANVAS_SHM_EPOCH);
     try {
       const projected = reader.read(), raw = JSON.stringify(projected);
       assert.deepEqual(projected.events.filter(event => ['working', 'idle', 'progress'].includes(event.type)).map(event => event.type), ['working', 'idle', 'progress']);
-      for (const secret of ['OWNED_SECRET_SESSION', 'owned-session', config.reports, config.receipts, env.AGENT_CANVAS_RUN]) assert.equal(raw.includes(secret), false);
+      for (const secret of ['OWNED_SECRET_SESSION', 'owned-session', config.reports, config.receipts]) assert.equal(raw.includes(secret), false);
     } finally { reader.close(); }
     await app.close();
     const persisted = JSON.parse(await readFile(file, 'utf8'));
@@ -340,7 +367,7 @@ nativeTest('production runtime receives session/activity/progress, persists meta
     assert.equal(persisted.agents[0].note, 'Telemetry result 🧋');
     assert.equal(persisted.agents[0].activity, undefined);
     assert.ok(!JSON.stringify(persisted).includes(config.reports));
-    assert.ok(!JSON.stringify(persisted).includes(env.AGENT_CANVAS_RUN));
-    client.drain(); assert.equal(client.closed, true);
+    assert.equal(env.AGENT_CANVAS_RUN, undefined);
+    client.drain(); assert.equal(client.closed, false); assert.equal(client.fenced, true);
   } finally { client?.close(); await app.close(); await rm(directory, { recursive: true, force: true }); }
 });

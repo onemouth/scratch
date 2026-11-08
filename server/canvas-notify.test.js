@@ -107,7 +107,7 @@ nativeTest('semaphore notifications reach two independent processes and preserve
 
 nativeTest('SHM telemetry runtime transitions publish immediately; Resume changes public generation and cleans old channel', async () => {
   const children = [];
-  const app = createApp({ port: 0, sharedMemory: true, spawnAgent: (_bin, _args, options) => {
+  const app = createApp({ port: 0, spawnAgent: (_bin, _args, options) => {
     const child = new EventEmitter();
     Object.assign(child, { options, onData: fn => child.on('data', fn), onExit: fn => child.on('exit', fn),
       write() {}, resize() {}, kill: () => child.emit('exit', { exitCode: 0 }) });
@@ -126,7 +126,7 @@ nativeTest('SHM telemetry runtime transitions publish immediately; Resume change
     const original = reader.read().agents[0].processGeneration;
     const channel = children[0].options.env.AGENT_CANVAS_SHM_NOTIFY;
     assert.ok(channel.startsWith('/scsh-'));
-    assert.notEqual(original, children[0].options.env.AGENT_CANVAS_RUN);
+    assert.equal(children[0].options.env.AGENT_CANVAS_RUN, undefined);
     const { createCanvasTelemetryClient } = await import('./canvas-telemetry-client.js');
     telemetry = createCanvasTelemetryClient({ config: JSON.parse(children[0].options.env.AGENT_CANVAS_SHM_TELEMETRY), name: app.sharedMemory.name, epoch: app.sharedMemory.epoch });
     let sent;

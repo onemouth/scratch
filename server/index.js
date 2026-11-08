@@ -25,10 +25,11 @@ const apiGuide = join(root, 'docs', 'agent-api.md');
 
 export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent = pty.spawn, stateFile = null, cardsFile = stateFile ? stateFile + '.cards.sqlite' : ':memory:',
   publicOrigin = process.env.AGENT_CANVAS_PUBLIC_ORIGIN,
-  sharedMemory = process.env.AGENT_CANVAS_SHARED_MEMORY !== '0',
+  sharedMemory = {},
   mediaDirectory = cardsFile === ':memory:' ? null : dirname(resolve(cardsFile)),
   interactiveMediaRoot = join(homedir(), 'Documents', 'agent-canvas', 'media'),
   sessionsRoot = process.env.PI_CODING_AGENT_SESSION_DIR || join(process.env.PI_CODING_AGENT_DIR || join(homedir(), '.pi', 'agent'), 'sessions') } = {}) {
+  if (!sharedMemory || typeof sharedMemory !== 'object') throw new Error('SHM is required; HTTP-only mode has been removed');
   const trustedPublicOrigin = parsePublicOrigin(publicOrigin);
   const agents = new Map();
   const quietLayoutLaunches = new Set();
@@ -141,15 +142,15 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       }
       try {
         views = new CardViews(saved?.cardBox, cards.list());
-        if (sharedMemory) memory = createCanvasMemory({
-          ...(typeof sharedMemory === 'object' ? sharedMemory : {}),
+        memory = createCanvasMemory({
+          ...sharedMemory,
           getAgents: () => runtime.list(),
           getState: () => ({ agents: runtime.list(), edges: [...edges.values()], notes: [...notes.values()],
             cards: cards.list({ includeInteractiveSource: false }), cardPlacements: [...cardPlacements.values()] }),
         });
-        if (memory) messaging = createCanvasMessaging({ epoch: memory.epoch,
+        messaging = createCanvasMessaging({ epoch: memory.epoch,
           getAgent: id => agents.has(id) ? runtime.describe(agents.get(id)) : null });
-        if (memory) telemetry = createCanvasTelemetry({ epoch: memory.epoch, apply: runtime.applyTelemetry });
+        telemetry = createCanvasTelemetry({ epoch: memory.epoch, apply: runtime.applyTelemetry });
         await new Promise((resolveListen, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolveListen); });
       } catch (error) { telemetry?.close(); messaging?.close(); memory?.close(); cards.close(); unlockCards(); unlock(); throw error; }
       started = true;

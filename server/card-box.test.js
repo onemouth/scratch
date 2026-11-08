@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import { createApp } from './index.js';
+import { reportTelemetry } from '../scripts/tests/telemetry-fixture.js';
 import { syncCardBoxPlacements } from './card-box-layout.js';
 
 test('all cards get append-only layouts, including library-only cards', () => {
@@ -34,7 +35,7 @@ test('Card box singleton, separate layouts, reset isolation and exact-session re
     children.push(child);
     return child;
   };
-  let app = createApp({ port: 0, sharedMemory: false, stateFile, cardsFile, spawnAgent });
+  let app = createApp({ port: 0, stateFile, cardsFile, spawnAgent });
   const request = async (path, body, method = 'POST') => {
     const response = await fetch('http://127.0.0.1:' + app.server.address().port + '/api' + path, { method, headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     return { status: response.status, data: await response.json() };
@@ -60,7 +61,7 @@ test('Card box singleton, separate layouts, reset isolation and exact-session re
     assert.equal((await request('/edges', { source: normal.id, target: box.data.id })).status, 400);
     const sessionFile = join(directory, 'box-session.jsonl');
     await writeFile(sessionFile, JSON.stringify({ type: 'session', id: 'box-session', cwd: directory }) + '\n');
-    await request('/agents/' + box.data.id + '/session', { runToken: children[1].options.env.AGENT_CANVAS_RUN, sessionId: 'box-session', sessionFile });
+    await reportTelemetry(children[1], 'session', { sessionId: 'box-session', sessionFile });
     await request('/card-box/placements/' + card.id, { x: 1200, y: 400, width: 500 }, 'PATCH');
     await app.close();
     app = createApp({ port: 0, stateFile, cardsFile, spawnAgent });

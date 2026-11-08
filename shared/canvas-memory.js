@@ -12,6 +12,9 @@ export function nativeMemory() {
 export const memoryName = () => `/scsh-${randomBytes(10).toString('hex')}`;
 export const MEMORY_PROTOCOL = 1;
 export const DEFAULT_CAPACITY = 1024 * 1024;
+// These conditions can clear on the original publisher without replacing any
+// process-owned channel. Never follow missing/closed/incompatible generations.
+export const transientMemoryError = error => ['SHM_STALE', 'SHM_BUSY', 'SHM_NOT_READY', 'SHM_UNAVAILABLE'].includes(error.code);
 
 export function openCanvasMemory(name, expectedEpoch) {
   const native = nativeMemory();

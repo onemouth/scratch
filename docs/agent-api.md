@@ -22,7 +22,7 @@ Returns `{ "agents": [...], "edges": [...], "notes": [...], "cards": [...], "car
 
 If this Pi process offers `canvas_read`, it can read paginated Canvas summaries directly from POSIX shared memory without HTTP. Optional parameters: `section` (`all`, `agents`, `edges`, `notes`, `cards`, `cardPlacements`), `offset` (default 0), `limit` (default 20, maximum 100). Follow each section's `nextOffset`. Results are bounded to 40 KB and include a generation and revision; notes/cards are summaries, not full source. Output, prompts, session tokens/paths, Interactive source/assets and Card Box view state are excluded. Metadata can lag its latest server mutation by the existing publication coalescing interval; this is not the full `/api/state` contract or an authoritative human-gesture lease check.
 
-This experimental feature is enabled by default, requires a locally built native addon (npm startup commands build it automatically), and is passed to new/restored Pi processes. Set `AGENT_CANVAS_SHARED_MEMORY=0` to disable it and skip startup compilation. Missing/stale/busy/incompatible memory returns an explicit tool error, never an implicit HTTP fallback. Keep using HTTP for this complete guide, mutations, authoritative layout/busy validation, terminal output and full card reads. Do not enable/restart services or relaunch other agents without permission. See [shared-memory setup and limits](shared-memory.md).
+SHM is required on macOS/Linux, requires a locally built native addon (npm startup commands build it automatically), and is passed to new/restored Pi processes. HTTP-only mode and its environment switch have been removed. Missing/stale/busy/incompatible memory returns an explicit tool error, never an implicit HTTP fallback. Keep using HTTP for this complete guide, mutations, authoritative layout/busy validation, terminal output and full card reads. Do not enable/restart services or relaunch other agents without permission. See [shared-memory setup and limits](shared-memory.md).
 
 ### Subscribe instead of waiting
 
@@ -46,7 +46,7 @@ curl -fsS "$AGENT_CANVAS_URL/api/agents/<AGENT_ID>/output"
 
 ### Removed HTTP wait
 
-`POST /api/agents/:id/wait` is no longer supported (404). Use canvas_subscribe for future Agent events and canvas_read for current state. Subscribing to an already-idle agent does not synthesize a new event. HTTP-only clients retain metadata/output queries but have no blocking wait or automatic subscription fallback.
+`POST /api/agents/:id/wait` is no longer supported (404). Use canvas_subscribe for future Agent events and canvas_read for current state. Subscribing to an already-idle agent does not synthesize a new event. External HTTP clients retain metadata/output queries but have no blocking wait or automatic subscription fallback.
 
 ## Card box
 
@@ -157,21 +157,9 @@ curl -fsS -X POST "$AGENT_CANVAS_URL/api/agents" \
 
 When available, use `canvas_send_message({agentId,text})` rather than terminal paste/HTTP. Scratch routes your dedicated SHM outbox to the target process mailbox; native semaphores notify receivers. Default nextTurn does not wake; followUp/wake is explicit and rate/lifetime-budget limited. The tool returns queued with a message ID; `canvas_message_status({messageId})` reads later receipts without waiting. Accepted means Scratch enqueued the pinned target generation; delivered only means the receiver invoked Pi's custom-message API, not read/answered/completed. Do not automatically resend uncertain outcomes or create reply/wake loops. Maximum text is 8000 UTF-8 bytes. No HTTP fallback, persistence or restart replay. Messaging is process-scoped: reload/new/resume/fork retains channels, pending messages and receipts, then rebinds handoff to the current Pi context. No process relaunch is needed for a session change. See [full messaging contract](agent-messaging.md).
 
-## Legacy HTTP/TTY messaging
+## Removed HTTP/TTY messaging
 
-This independent endpoint remains for explicitly chosen human/external-client use, not as an automatic fallback from SHM tools. It does not provide the SHM protocol's receipts or generation pinning.
-
-Use an agent **ID** from `GET /api/state` to address a running node. Include `fromId` when sending from a Canvas agent so the receiver can tell who sent it:
-
-```sh
-jq -n --arg to '<TARGET_AGENT_ID>' --arg from "$AGENT_CANVAS_ID" --arg text 'Hi, please review the test results' \
-  '{toId:$to,fromId:$from,text:$text}' |
-  curl -fsS -X POST "$AGENT_CANVAS_URL/api/messages" -H 'Content-Type: application/json' --data-binary @-
-```
-
-Alternatively, use `{"toName":"Researcher","text":"Hi"}` instead of `toId` **only if the name is unique** (exact match). Specify exactly one of `toId` or `toName`; duplicate names return HTTP 409, missing agents return 404, and stopped agents return 409. `fromId` is optional (for a human or external client) but must be an existing agent ID if supplied. The `text` must be non-blank, at most 10,000 characters, and contain no terminal control characters; ordinary newlines are allowed.
-
-The API returns HTTP 202 once the text has been written to the destination's Pi TTY using bracketed paste followed by Enter. **This is not a delivery/read acknowledgement**: it does not guarantee Pi has processed the message. As with typing into the terminal, avoid sending while the recipient is in a picker, editing an unfinished prompt, or running another terminal application. Sending a message does **not** create a delegation edge. Edges never forward messages automatically.
+`POST /api/messages` returns 404. Use SHM canvas_send_message for peer messages; it never pastes prompts into terminals. Browser terminal WebSocket input remains unchanged.
 
 ## Record or remove a delegation
 
@@ -202,19 +190,13 @@ curl -fsS -X PATCH "$AGENT_CANVAS_URL/api/agents/<AGENT_ID>" \
   -d '{"name":"staging-tester"}'
 ```
 
-Names must be non-blank and at most 100 characters; surrounding whitespace is trimmed. This changes only the Canvas node name, not Pi's saved session name. The node ID, running process, conversation and edges remain unchanged—do not replace the session to rename it. Name-based messaging uses the new name immediately; names need not be unique, so prefer IDs. Rename another agent only when asked.
+Names must be non-blank and at most 100 characters; surrounding whitespace is trimmed. This changes only the Canvas node name, not Pi's saved session name. The node ID, running process, conversation and edges remain unchanged—do not replace the session to rename it. SHM messaging uses Agent IDs, not names; names need not be unique. Rename another agent only when asked.
 
 ## Update your progress note
 
 When available, prefer `canvas_set_progress({text:"Reviewing SHM synchronization"})`. It enqueues only your own note through a dedicated process-scoped Pi → Scratch SHM channel, independent of peer messaging. Empty text clears it; maximum 500 JS UTF-16 code units. Queued is not applied or saved; Scratch validates/applies the update, with background receipts/UI warnings. Use canvas_read for observed state when needed, not polling. No automatic resend or HTTP fallback after a failed/unknown send. Session/activity reports are automatic through this same telemetry transport. Reload/new/resume/fork preserves transport and sequences. Temporary `SHM_STALE` pauses writes; the original epoch's heartbeat recovery resumes the same channel and freshly samples current session/activity, never replaying old progress/reports or waking a model. Closed/missing/replaced generations remain fenced. See [telemetry contract](agent-telemetry.md).
 
-The following HTTP PATCH remains available when the SHM tool is not provisioned (for example explicit HTTP-only startup), not as a failure fallback.
-
-```sh
-curl -fsS -X PATCH "$AGENT_CANVAS_URL/api/agents/$AGENT_CANVAS_ID" \
-  -H 'Content-Type: application/json' \
-  -d '{"note":"Reviewing tests; waiting for researcher findings"}'
-```
+HTTP PATCH of an Agent's note is removed (400, with no partial metadata/layout update). Name and Agent Canvas geometry PATCH remain available.
 
 Agent progress notes are at most 500 characters and appear on the node. Only update **your own** progress note. Independently, Agent Canvas `x,y,width,height` may be adjusted on any agent through the layout contract above; Card Box geometry remains human-only.
 
@@ -228,13 +210,13 @@ On server restart, previously running agents reopen their recorded session witho
 
 `POST /api/canvas/reset` with `{"confirm":true}` stops only Agent Canvas agents and clears its nodes/notes/edges/placements. The Card box agent, layouts and library are preserved. **Only do this when the user explicitly requests resetting the entire Canvas.** Pi sessions and project files are not deleted. The browser provides confirmation; API clients must obtain user confirmation themselves.
 
-The internal `POST /api/agents/:id/session` and `POST /api/agents/:id/activity` callbacks are reserved for the bundled Pi extension; agents should not call them. They are used only in explicit HTTP-only mode; SHM-provisioned processes return 409 for mixed HTTP reports. Normally the tracker uses a dedicated process-scoped SHM telemetry channel for session identity, ordered working/idle state and own progress. HTTP-only callbacks retain per-process run-token validation and process-scoped sequences, including protection against older session reports overwriting newer ones. Neither sends messages or prompts. `sessionFile` and `sessionId` on agent records identify the conversation, not the Canvas node.
+`POST /api/agents/:id/session` and `/activity` are removed (404). Session identity and working/idle reports are automatic through the process-scoped SHM telemetry channel only; there is no HTTP-only mode. Channel identity/generation and monotonic process-wide sequences fence stale reports. `sessionFile` and `sessionId` identify the conversation, not the Canvas node, and stay private.
 
 ## Other interfaces and boundaries
 
 - `GET /api/session-workdirs` lists existing workdirs referenced by saved Pi session headers (used by the web UI's workdir dropdown; it does not read conversation content).
 - `GET /api/events` is a Server-Sent Events stream of canvas snapshots (used by the web UI).
-- `WS /api/terminal/:id` streams PTY output and accepts raw terminal input and resize messages (used by the web UI). Prefer canvas_send_message for agent-to-agent messages when available; POST /api/messages is a separately chosen legacy TTY interface.
+- `WS /api/terminal/:id` streams PTY output and accepts raw terminal input and resize messages (used by the web UI). Prefer canvas_send_message for agent-to-agent messages when available; POST /api/messages has been removed (404).
 - `POST /api/agents/:id/stop` terminates a Pi process. `DELETE /api/agents/:id` removes a **stopped** node and its relationships from this canvas, but does not delete its saved Pi session. Don't stop or remove another agent unless explicitly asked.
 - Calls return JSON; failures return `{ "error": "..." }` with a non-2xx HTTP status. `curl -f` treats these as errors.
 - There is **no automatic message passing** and no authentication. A single local Canvas is auto-saved; restoration reopens conversations, not in-flight tasks. Use the API only against the user's configured Canvas server and record relationships only for actual work. Canvas-launched agents must keep using their supplied loopback URL.

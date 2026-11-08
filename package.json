@@ -5,9 +5,9 @@
   "type": "module",
   "scripts": {
     "postinstall": "node scripts/fix-pty-helper.js",
-    "predev": "node scripts/build-shm.js --if-enabled",
-    "prestart": "node scripts/build-shm.js --if-enabled",
-    "pretest": "node scripts/build-shm.js --if-enabled",
+    "predev": "node scripts/build-shm.js",
+    "prestart": "node scripts/build-shm.js",
+    "pretest": "node scripts/build-shm.js",
     "dev": "concurrently -k \"node server/index.js\" \"vite --host 127.0.0.1\"",
     "build": "vite build",
     "build:shm": "node scripts/build-shm.js",

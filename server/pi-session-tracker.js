@@ -20,11 +20,8 @@ export function assistantPreview(message, limit = 120) {
 }
 
 export default function sessionTracker(pi) {
-  const base = process.env.AGENT_CANVAS_URL;
   const id = process.env.AGENT_CANVAS_ID;
-  const runToken = process.env.AGENT_CANVAS_RUN;
-  const mode = process.env.AGENT_CANVAS_TELEMETRY_TRANSPORT ?? (process.env.AGENT_CANVAS_SHM_TELEMETRY ? 'shm' : 'http');
-  if (!id || (mode === 'http' && (!base || !runToken))) return;
+  if (!id) return;
   const owner = Symbol('Pi telemetry context');
   let broker, preview = '';
   const active = () => broker?.binding?.owner === owner && !broker.closed;
@@ -47,8 +44,8 @@ export default function sessionTracker(pi) {
   pi.on('session_start', async (_event, ctx) => {
     if (!['tui', 'rpc'].includes(ctx.mode)) return;
     try {
-      const config = mode === 'shm' ? JSON.parse(process.env.AGENT_CANVAS_SHM_TELEMETRY) : undefined;
-      broker = bindTelemetryProcess({ mode, config, base, id, runToken, ctx, owner,
+      const config = JSON.parse(process.env.AGENT_CANVAS_SHM_TELEMETRY);
+      broker = bindTelemetryProcess({ config, id, ctx, owner,
         name: process.env.AGENT_CANVAS_SHM_NAME, epoch: process.env.AGENT_CANVAS_SHM_EPOCH,
         snapshot: () => ({
           session: { sessionFile: ctx.sessionManager.getSessionFile() ?? null, sessionId: ctx.sessionManager.getSessionId() },
@@ -62,7 +59,7 @@ export default function sessionTracker(pi) {
     }
   });
   pi.on('session_shutdown', (event = { reason: 'quit' }) => detachTelemetryProcess(broker, owner, event.reason));
-  if (mode === 'shm') pi.registerTool({
+  pi.registerTool({
     name: 'canvas_set_progress', label: 'Set Canvas progress',
     description: 'Enqueue your own progress note through the dedicated Pi-to-Scratch SHM telemetry channel. Maximum 500 characters; empty text clears it. Returns queued, not applied or durably saved. Scratch validates and updates Canvas; use canvas_read for observed state. Process-scoped across reload/new/resume/fork. No HTTP fallback, automatic resend or direct Canvas-state writes.',
     promptSnippet: 'Report your own progress through SHM',

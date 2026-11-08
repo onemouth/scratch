@@ -1,6 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { existsSync } from 'node:fs';
+import { readFile } from 'node:fs/promises';
 import { EventEmitter } from 'node:events';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -16,7 +17,7 @@ const empty = () => ({ agents: [], edges: [], notes: [], cards: [], cardPlacemen
 
 nativeTest('Scratch publishes isolated state and passes a read-only memory tool to Pi without changing HTTP/PTY behavior', async () => {
   const children = [];
-  const app = createApp({ port: 0, sharedMemory: true, spawnAgent: (_bin, args, options) => {
+  const app = createApp({ port: 0, spawnAgent: (_bin, args, options) => {
     const child = new EventEmitter();
     Object.assign(child, { args, options, onData: fn => child.on('data', fn), onExit: fn => child.on('exit', fn),
       write() {}, resize() {}, kill: () => child.emit('exit', { exitCode: 0 }) });
@@ -48,7 +49,7 @@ nativeTest('Scratch publishes isolated state and passes a read-only memory tool 
     assert.equal(snapshot.agents[0].activity, 'working');
     assert.equal(snapshot.notes.find(value => value.id === note.id).summary, 'Visible note');
     assert.equal(snapshot.cards.find(value => value.id === card.id).summary, 'Shared title');
-    for (const forbidden of ['PRIVATE PROMPT', 'PRIVATE TERMINAL', 'PRIVATE HTML', 'PRIVATE_JS', child.options.env.AGENT_CANVAS_RUN]) assert.equal(raw.includes(forbidden), false);
+    for (const forbidden of ['PRIVATE PROMPT', 'PRIVATE TERMINAL', 'PRIVATE HTML', 'PRIVATE_JS']) assert.equal(raw.includes(forbidden), false);
     assert.equal((await (await fetch(`${base}/agents/${agent.id}/output`)).json()).output.includes('PRIVATE TERMINAL'), true);
     const fixture = new URL('../scripts/tests/shm-child.mjs', import.meta.url);
     const { stdout } = await promisify(execFile)(process.execPath, [fixture.pathname, 'tool', name, epoch], { timeout: 10000 });
@@ -81,29 +82,25 @@ nativeTest('publisher rejects overflow without serving stale state, recovers on 
   } finally { old.close(); first.close(); }
 });
 
-nativeTest('shared memory defaults on, supports environment opt-out and explicit app override', async () => {
+nativeTest('SHM is mandatory; removed environment opt-out is ignored and false app config is rejected', async () => {
   const previous = process.env.AGENT_CANVAS_SHARED_MEMORY;
   try {
-    delete process.env.AGENT_CANVAS_SHARED_MEMORY;
-    const enabled = createApp({ port: 0 });
-    try { await enabled.listen(); assert.ok(enabled.sharedMemory?.name); } finally { await enabled.close(); }
     process.env.AGENT_CANVAS_SHARED_MEMORY = '0';
-    const disabled = createApp({ port: 0 });
-    try { await disabled.listen(); assert.equal(disabled.sharedMemory, null); } finally { await disabled.close(); }
-    const override = createApp({ port: 0, sharedMemory: true });
-    try { await override.listen(); assert.ok(override.sharedMemory?.name); } finally { await override.close(); }
+    const app = createApp({ port: 0 });
+    try { await app.listen(); assert.ok(app.sharedMemory?.name); } finally { await app.close(); }
+    assert.throws(() => createApp({ port: 0, sharedMemory: false }), /SHM is required/);
   } finally {
     if (previous === undefined) delete process.env.AGENT_CANVAS_SHARED_MEMORY;
     else process.env.AGENT_CANVAS_SHARED_MEMORY = previous;
   }
 });
 
-test('HTTP-only lifecycle skips compilation when explicitly disabled', async () => {
-  const script = new URL('../scripts/build-shm.js', import.meta.url).pathname;
-  const { stdout } = await promisify(execFile)(process.execPath, [script, '--if-enabled'], {
-    env: { ...process.env, AGENT_CANVAS_SHARED_MEMORY: '0', PATH: '' }, timeout: 5000,
-  });
-  assert.match(stdout, /disabled; skipping native build/);
+test('native build lifecycle has no environment opt-out', async () => {
+  // Never run a destructive node-gyp rebuild alongside other native tests.
+  const script = await readFile(new URL('../scripts/build-shm.js', import.meta.url), 'utf8');
+  const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
+  assert.equal(script.includes('AGENT_CANVAS_SHARED_MEMORY'), false);
+  for (const name of ['predev', 'prestart', 'pretest']) assert.equal(pkg.scripts[name], 'node scripts/build-shm.js');
 });
 
 test('projection allowlists data, bounded summaries and no card source or session credentials', () => {

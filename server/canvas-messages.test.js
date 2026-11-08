@@ -179,9 +179,37 @@ test('post-commit wake errors retain the message ID; stale servers fence pending
     stale = true; a.drain();
     assert.equal(a.status(pending.messageId).status, 'unknown');
     assert.equal(a.status(sent.messageId).status, 'delivered');
-    assert.throws(() => a.send({ agentId: 'b', text: 'Closed' }), { code: 'SHM_CLOSED' });
+    assert.throws(() => a.send({ agentId: 'b', text: 'Paused, not buffered' }), { code: 'SHM_STALE' });
+    assert.equal(a.closed, false); assert.equal(a.paused, true);
     assert.equal(f.errors.at(-1).code, 'SHM_STALE');
+    stale = false; a.drain(); f.pump();
+    assert.equal(a.paused, false); assert.equal(a.status(pending.messageId).status, 'delivered');
+    assert.equal(f.received.get('b').filter(frame => frame.messageId === pending.messageId).length, 1);
   } finally { f.close(); }
+});
+
+test('messaging transient errors recover but fatal epochs retain fenced process handles until explicit cleanup', () => {
+  for (const code of ['SHM_STALE', 'SHM_BUSY', 'SHM_NOT_READY', 'SHM_UNAVAILABLE', 'SHM_VERSION']) {
+    const f = fixture(); let failure = null;
+    try {
+      const a = f.client('a', { open: (...args) => {
+        const reader = openCanvasMemory(...args);
+        return { read() { if (failure) throw Object.assign(new Error('Snapshot check failed'), { code: failure }); return reader.read(); }, close: () => reader.close() };
+      } });
+      f.client('b'); failure = code; a.drain();
+      assert.equal(a.closed, false);
+      assert.throws(() => native.queueOpen(f.channels.get('a').config.outbox, 'producer'), { code: 'SHM_BUSY' });
+      failure = null; a.drain();
+      if (code === 'SHM_VERSION') {
+        assert.equal(a.fenced, true);
+        assert.throws(() => a.send({ agentId: 'b', text: 'Never reconnect' }), { code: 'MESSAGE_CHANNEL_FENCED' });
+      } else {
+        const sent = a.send({ agentId: 'b', text: 'Fresh after recovery' }); f.pump();
+        assert.equal(a.status(sent.messageId).status, 'delivered');
+      }
+      a.close(); assert.equal(a.closed, true);
+    } finally { f.close(); }
+  }
 });
 
 test('follow-ups have sender/recipient rate limits and finite process budgets; ordinary messages never wake', () => {
@@ -364,28 +392,24 @@ test('process messaging survives reload/new/resume/fork with paused handoffs, cu
   } finally { process[key]?.close(); process.env = old; f.close(); }
 });
 
-test('runtime provisions private per-run queues, omits descriptors/payloads from Canvas state and skips them in HTTP-only mode', async () => {
-  for (const sharedMemory of [true, false]) {
-    const children = [];
-    const app = createApp({ port: 0, sharedMemory, spawnAgent: (_bin, args, options) => {
-      const child = new EventEmitter(); Object.assign(child, { args, options, onData: fn => child.on('data', fn), onExit: fn => child.on('exit', fn),
-        write() {}, resize() {}, kill: () => child.emit('exit', { exitCode: 0 }) }); children.push(child); return child;
-    } });
-    try {
-      await app.listen(); const base = `http://127.0.0.1:${app.server.address().port}/api`;
-      const post = (path, body = {}) => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
-      const agent = await (await post('/agents', { name: 'Messaging fixture', workdir: process.cwd() })).json();
-      const raw = children[0].options.env.AGENT_CANVAS_SHM_MESSAGES;
-      assert.equal(Boolean(raw), sharedMemory);
-      assert.equal(children[0].args.some(arg => String(arg).endsWith('/pi-canvas-messages.js')), sharedMemory);
-      if (sharedMemory) {
-        const config = JSON.parse(raw); assert.equal(config.generation, app.runtime.get(agent.id).processGeneration);
-        assert.equal(JSON.stringify(await (await fetch(base + '/state')).json()).includes(config.outbox), false);
-        await post(`/agents/${agent.id}/stop`); await post(`/agents/${agent.id}/resume`);
-        const next = JSON.parse(children[1].options.env.AGENT_CANVAS_SHM_MESSAGES);
-        assert.notEqual(next.generation, config.generation);
-        assert.throws(() => native.queueOpen(config.outbox, 'producer'), { code: 'SHM_MISSING' });
-      }
-    } finally { await app.close(); }
-  }
+test('runtime always provisions private per-run queues and omits descriptors/payloads from Canvas state', async () => {
+  const children = [];
+  const app = createApp({ port: 0, spawnAgent: (_bin, args, options) => {
+    const child = new EventEmitter(); Object.assign(child, { args, options, onData: fn => child.on('data', fn), onExit: fn => child.on('exit', fn),
+      write() {}, resize() {}, kill: () => child.emit('exit', { exitCode: 0 }) }); children.push(child); return child;
+  } });
+  try {
+    await app.listen(); const base = `http://127.0.0.1:${app.server.address().port}/api`;
+    const post = (path, body = {}) => fetch(base + path, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    const agent = await (await post('/agents', { name: 'Messaging fixture', workdir: process.cwd() })).json();
+    const raw = children[0].options.env.AGENT_CANVAS_SHM_MESSAGES;
+    assert.ok(raw);
+    assert.ok(children[0].args.some(arg => String(arg).endsWith('/pi-canvas-messages.js')));
+    const config = JSON.parse(raw); assert.equal(config.generation, app.runtime.get(agent.id).processGeneration);
+    assert.equal(JSON.stringify(await (await fetch(base + '/state')).json()).includes(config.outbox), false);
+    await post(`/agents/${agent.id}/stop`); await post(`/agents/${agent.id}/resume`);
+    const next = JSON.parse(children[1].options.env.AGENT_CANVAS_SHM_MESSAGES);
+    assert.notEqual(next.generation, config.generation);
+    assert.throws(() => native.queueOpen(config.outbox, 'producer'), { code: 'SHM_MISSING' });
+  } finally { await app.close(); }
 });

@@ -54,9 +54,9 @@ try {
     const child = spawn('pi', ['--mode', 'rpc', '--no-session', '--no-extensions', '--no-skills', '--no-prompt-templates',
       '--extension', fileURLToPath(new URL('./pi-messages-extension.js', import.meta.url))], {
       cwd, stdio: ['pipe', 'pipe', 'pipe'],
-      env: { ...process.env, PI_CODING_AGENT_DIR: cwd, AGENT_CANVAS_URL: '', AGENT_CANVAS_ID: agent.id, AGENT_CANVAS_RUN: '',
+      env: { ...process.env, PI_CODING_AGENT_DIR: cwd, AGENT_CANVAS_URL: '', AGENT_CANVAS_ID: agent.id,
         AGENT_CANVAS_SHM_NAME: memory.name, AGENT_CANVAS_SHM_EPOCH: memory.epoch, AGENT_CANVAS_SHM_MESSAGES: JSON.stringify(channel.config),
-        AGENT_CANVAS_TELEMETRY_TRANSPORT: 'shm', AGENT_CANVAS_SHM_TELEMETRY: JSON.stringify(telemetryChannel.config) },
+        AGENT_CANVAS_SHM_TELEMETRY: JSON.stringify(telemetryChannel.config) },
     });
     const peer = { id: agent.id, child, events: [], bus: new EventEmitter(), stderr: '', failure: null };
     peers.push(peer); peer.exit = once(child, 'exit'); peer.exit.catch(() => {});

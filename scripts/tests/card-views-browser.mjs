@@ -47,7 +47,7 @@ try {
  const linkedPeer=await api('/cards','POST',{content:'Fixture 1',tags:['reading'],links:[tagPeer.id],place:false});
  for(let i=2;i<31;i++)await api('/cards','POST',{content:'Fixture '+i,tags:['reading'],place:false});
  const boxAgent=await api('/card-box/agent','POST',{});
- await api('/agents/'+boxAgent.id,'PATCH',{note:'Disposable fixture · echo terminal only · no Pi/model execution'});
+ // The disposable fake PTY never runs Pi or a model; progress is SHM-only.
  const original=app.snapshot().cardBox.activeViewId;
  const config=devServerConfig({PORT:String(app.server.address().port)});
  // Fixture only: permit its ephemeral frontend origin, and show loopback guide URLs.

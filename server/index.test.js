@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { tmpdir } from 'node:os';
 import { WebSocket } from 'ws';
 import { createApp } from './index.js';
+import { reportTelemetry } from '../scripts/tests/telemetry-fixture.js';
 
 function fakeSpawn(_bin, args, options) {
   const child = new EventEmitter();
@@ -31,7 +32,7 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     await writeFile(join(sessionsRoot, 'project', name), JSON.stringify({ type: 'session', cwd: process.cwd() }) + '\n' + '{"type":"message","message":{"content":"not read"}}\n');
   }
   await writeFile(join(sessionsRoot, 'project', 'invalid.jsonl'), 'not json\n');
-  const app = createApp({ port: 0, sharedMemory: false, spawnAgent: fakeSpawn, sessionsRoot });
+  const app = createApp({ port: 0, spawnAgent: fakeSpawn, sessionsRoot });
   await app.listen();
   const base = `http://127.0.0.1:${app.server.address().port}`;
   const request = async (path, method = 'GET', body) => {
@@ -87,18 +88,12 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assertCanvasSkill(fakeSpawn.children[0]);
     assert.deepEqual(fakeSpawn.children[0].args.slice(-2), ['--', 'hello']);
     assert.ok(!fakeSpawn.children[0].args.includes('--no-session'));
-    const activityPath = `/api/agents/${first.id}/activity`;
-    const runToken = fakeSpawn.children[0].options.env.AGENT_CANVAS_RUN;
     assert.equal(app.snapshot().agents.find(agent => agent.id === first.id).activity, 'unknown');
-    assert.equal((await request(activityPath, 'POST', { runToken: 'wrong', state: 'working', seq: 1 })).status, 409);
-    assert.equal((await request(activityPath, 'POST', { runToken, state: 'blocked', seq: 1 })).status, 400);
-    assert.equal((await request(activityPath, 'POST', { runToken, state: 'working', seq: 1 })).status, 200);
-    assert.equal((await request(activityPath, 'POST', { runToken, state: 'idle', seq: 0 })).status, 200);
+    await reportTelemetry(fakeSpawn.children[0], 'activity', { state: 'working' });
     assert.equal(app.snapshot().agents.find(agent => agent.id === first.id).activity, 'working');
-    assert.equal((await request(activityPath, 'POST', { runToken, state: 'idle', seq: 2, summary: 'Implemented the requested change.' })).status, 200);
+    await reportTelemetry(fakeSpawn.children[0], 'activity', { state: 'idle', summary: 'Implemented the requested change.' });
     assert.equal(app.snapshot().agents.find(agent => agent.id === first.id).activity, 'idle');
     assert.equal(app.snapshot().agents.find(agent => agent.id === first.id).notificationSummary, 'Implemented the requested change.');
-    assert.equal((await request(activityPath, 'POST', { runToken, state: 'working', seq: 3, summary: 'not allowed' })).status, 400);
     assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), mode: 'unknown' })).status, 400);
     assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), task: '  ' })).status, 400);
     const blank = (await request('/api/agents', 'POST', { name: 'Blank session', workdir: process.cwd() })).data;
@@ -116,23 +111,9 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.equal((await request('/api/agents', 'POST', { name: 'invalid', workdir: process.cwd(), mode: 'resume', task: 'ignored?' })).status, 400);
     const second = (await request('/api/agents', 'POST', { name: 'child', task: 'help', workdir: process.cwd(), parentId: first.id })).data;
     assert.equal(app.snapshot().edges[0].target, second.id);
-    const byId = await request('/api/messages', 'POST', { toId: second.id, fromId: first.id, text: 'Hi\nPlease review' });
-    assert.equal(byId.status, 202);
-    assert.deepEqual(byId.data, { ok: true, targetId: second.id, status: 'written-to-tty' });
-    assert.deepEqual(fakeSpawn.children[3].inputs, [`\x1b[200~Canvas message from agent ${first.id}:\nHi\nPlease review\x1b[201~\r`]);
-    assert.equal((await request('/api/messages', 'POST', { toName: 'Blank session', text: 'hi' })).status, 202);
-    assert.deepEqual(fakeSpawn.children[1].inputs, ['\x1b[200~hi\x1b[201~\r']);
-    assert.equal(app.snapshot().edges.length, 1); // Explicit messaging does not create delegation edges.
-    assert.equal((await request('/api/messages', 'POST', { toId: second.id, toName: 'child', text: 'hi' })).status, 400);
-    assert.equal((await request('/api/messages', 'POST', { toId: second.id, text: 'hi\x1b[201~\r' })).status, 400);
-    assert.equal((await request('/api/messages', 'POST', { toId: second.id, text: '   ' })).status, 400);
-    assert.equal((await request('/api/messages', 'POST', { toId: 'missing', text: 'hi' })).status, 404);
-    assert.equal((await request('/api/messages', 'POST', { toName: 'missing', text: 'hi' })).status, 404);
-    assert.equal((await request('/api/messages', 'POST', { toId: second.id, fromId: 'missing', text: 'hi' })).status, 404);
-    const duplicate = (await request('/api/agents', 'POST', { name: 'child', workdir: process.cwd() })).data;
-    assert.equal((await request('/api/messages', 'POST', { toName: 'child', text: 'hi' })).status, 409);
-    assert.equal((await request(`/api/agents/${duplicate.id}/stop`, 'POST')).status, 200);
-    assert.equal((await request('/api/messages', 'POST', { toId: duplicate.id, text: 'hi' })).status, 409);
+    assert.equal((await request('/api/messages', 'POST', { toId: second.id, text: 'Removed' })).status, 404);
+    assert.deepEqual(fakeSpawn.children[3].inputs, []);
+    assert.equal(app.snapshot().edges.length, 1);
     const relationship = app.snapshot().edges[0];
     assert.equal(relationship.type, 'delegates');
     assert.equal(relationship.label, 'delegates');
@@ -155,7 +136,10 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     await new Promise(resolve => setTimeout(resolve, 20));
     assert.deepEqual(fakeSpawn.children[0].inputs, ['test\r']);
     assert.deepEqual(fakeSpawn.children[0].resizes, [{ cols: 80, rows: 24 }]);
-    await request(`/api/agents/${first.id}`, 'PATCH', { note: 'Investigating', x: 50, width: 520 });
+    assert.equal((await request(`/api/agents/${first.id}`, 'PATCH', { note: 'Reject atomically', x: 50, width: 520 })).status, 400);
+    assert.equal(app.snapshot().agents[0].note, '');
+    await reportTelemetry(fakeSpawn.children[0], 'progress', { text: 'Investigating' });
+    await request(`/api/agents/${first.id}`, 'PATCH', { x: 50, width: 520 });
     assert.equal(app.snapshot().agents[0].note, 'Investigating');
     assert.equal(app.snapshot().agents[0].width, 520);
     const processCount = fakeSpawn.children.length;
@@ -165,7 +149,7 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.equal(renamed.data.id, first.id);
     assert.equal(fakeSpawn.children.length, processCount);
     assert.equal(app.snapshot().edges[0].source, first.id);
-    assert.equal((await request('/api/messages', 'POST', { toName: 'staging-tester', text: 'hi' })).status, 202);
+    assert.equal((await request('/api/messages', 'POST', { toName: 'staging-tester', text: 'hi' })).status, 404);
     assert.equal((await request('/api/messages', 'POST', { toName: 'parent', text: 'hi' })).status, 404);
     for (const name of ['', '   ', null, 123, 'x'.repeat(101)]) {
       assert.equal((await request(`/api/agents/${first.id}`, 'PATCH', { name })).status, 400);
@@ -176,7 +160,7 @@ test('Pi PTY lifecycle, terminal I/O, delegation, and layout', async () => {
     assert.equal((await request(`/api/agents/${first.id}/stop`, 'POST')).status, 200);
     assert.equal(app.snapshot().agents[0].status, 'stopped');
     assert.equal(app.snapshot().agents[0].activity, 'unknown');
-    assert.equal((await request(activityPath, 'POST', { runToken, state: 'idle', seq: 3 })).status, 409);
+    assert.equal((await request(`/api/agents/${first.id}/activity`, 'POST', { state: 'idle', seq: 3 })).status, 404);
     assert.equal(app.snapshot().edges.length, 2);
     assert.equal((await request(`/api/agents/${first.id}`, 'DELETE')).status, 200);
     assert.ok(!app.snapshot().agents.some(agent => agent.id === first.id));

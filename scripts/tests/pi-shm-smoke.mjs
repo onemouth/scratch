@@ -18,7 +18,7 @@ try {
     '--extension', fileURLToPath(new URL('../../server/pi-canvas-memory.js', import.meta.url)),
     '--extension', fileURLToPath(new URL('./pi-shm-extension.js', import.meta.url))], {
     cwd: directory,
-    env: { ...process.env, PI_CODING_AGENT_DIR: directory, AGENT_CANVAS_URL: '', AGENT_CANVAS_ID: '', AGENT_CANVAS_RUN: '',
+    env: { ...process.env, PI_CODING_AGENT_DIR: directory, AGENT_CANVAS_URL: '', AGENT_CANVAS_ID: '',
       AGENT_CANVAS_SHM_NAME: publisher.name, AGENT_CANVAS_SHM_EPOCH: publisher.epoch, AGENT_CANVAS_SHM_NOTIFY: notifier.name },
     stdio: ['pipe', 'pipe', 'pipe'],
   });

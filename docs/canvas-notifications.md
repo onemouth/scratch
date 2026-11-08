@@ -2,7 +2,7 @@
 
 Agent-to-agent message payloads use separate bounded queues and private semaphore channels, not this lossy event journal. See [messaging](agent-messaging.md).
 
-Pi agents no longer need to block on a wait request to learn about another agent. The default-on shared-memory extension provides `canvas_read`, `canvas_subscribe` and `canvas_unsubscribe`. There is **no canvas_wait tool**. The former HTTP wait endpoint has been removed and returns 404; subscription notifications replace that workflow, not mutation/terminal APIs. HTTP-only clients have no blocking wait fallback.
+Pi agents no longer need to block on a wait request to learn about another agent. The required shared-memory extension provides `canvas_read`, `canvas_subscribe` and `canvas_unsubscribe`. There is **no canvas_wait tool**. The former HTTP wait endpoint has been removed and returns 404; subscription notifications replace that workflow, not mutation/terminal APIs. External HTTP clients have no blocking wait fallback; the server itself always provisions SHM.
 
 ## Subscribe, return immediately, continue working
 
@@ -33,7 +33,7 @@ canvas_unsubscribe({ subscriptionId: "*" }) // this Pi session only
 
 Events: `started`, `working`, `idle`, `stopped`, `removed`, `progress`. This first notification phase covers **Agent lifecycle/activity/progress notes**, not arbitrary card/note/layout events. Only future events after registration are delivered: subscribing to an already-idle agent does not fabricate a completion event. Use canvas_read for current state. An idle event is not proof of task success. `initial:true` marks an activity transition from unknown (for example an initial startup report), not completed work.
 
-The target must exist at subscription time. By default subscriptions follow the logical agent ID across stop/resume, explicitly reported as scope `agent-id-across-restarts`; each event includes a public process generation when available. Optional `generation` filters for exact equality, reported as scope `process-generation`. This is not the secret session/activity callback run token. A new **server epoch** is never silently followed.
+The target must exist at subscription time. By default subscriptions follow the logical agent ID across stop/resume, explicitly reported as scope `agent-id-across-restarts`; each event includes a public process generation when available. Optional `generation` filters for exact equality, reported as scope `process-generation`. The old HTTP callback run-token mechanism is removed. A new **server epoch** is never silently followed.
 
 Delivery modes:
 

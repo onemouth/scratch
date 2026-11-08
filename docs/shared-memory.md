@@ -1,8 +1,8 @@
 # Read-only Canvas shared memory (experimental)
 
-Scratch can publish a bounded, ephemeral Canvas projection for independent Pi processes to read without HTTP. This is an awareness layer enabled by default, not a replacement control API or database. It can be disabled explicitly. No Pi modifications, browser changes, automatic messaging or schema migration are required.
+Scratch can publish a bounded, ephemeral Canvas projection for independent Pi processes to read without HTTP. This awareness layer is required, not a replacement control API or database; HTTP-only mode has been removed. No Pi modifications, browser changes, automatic messaging or schema migration are required.
 
-## Startup and opt-out
+## Required startup
 
 On macOS/Linux with Node.js, Python 3 and a C++17 toolchain:
 
@@ -12,11 +12,11 @@ npm run dev  # predev builds the addon automatically
 # Or: npm start  # prestart also builds it
 ```
 
-Stop/start the server yourself when ready. Do not start a second server against live persistence or automatically restart existing agents. The feature is **on by default**. Set `AGENT_CANVAS_SHARED_MEMORY=0 npm run dev` (or `npm start`) for HTTP-only startup with native compilation skipped. `npm test` also builds first unless explicitly disabled; `npm run build:shm` always forces a build. Direct `node server/index.js` requires building first. A missing/unsupported native addon or failed enabled build fails startup; there is no process-local SharedArrayBuffer fallback or transparent HTTP fallback.
+Stop/start the server yourself when ready. Do not start a second server against live persistence or automatically restart existing agents. SHM is **required**. The former `AGENT_CANVAS_SHARED_MEMORY` opt-out is ignored; there is no HTTP-only startup. `npm test` also builds first; `npm run build:shm` always forces a build. Direct `node server/index.js` requires building first. A missing/unsupported native addon or failed build fails startup; there is no process-local SharedArrayBuffer fallback or transparent HTTP fallback.
 
 The addon is built for the local platform using the Node-API C interface (NAPI 8), without V8 headers or casts. Local testing covers macOS arm64 / Node 26; Linux is a target, not yet a verified CI platform. Windows is unsupported. `node-gyp` is a pinned development dependency, not a replacement for Node. The build uses matching locally installed Node headers when available, otherwise node-gyp downloads matching headers. No prebuilt native binary is committed.
 
-When enabled, newly launched/restored Pi processes receive:
+Newly launched/restored Pi processes receive:
 
 - `--extension <repo>/server/pi-canvas-memory.js`
 - `AGENT_CANVAS_SHM_NAME`: unique POSIX name for this server lifetime.
@@ -83,4 +83,4 @@ npm run test:views:browser
 npm run build
 ```
 
-`npm test` builds the addon by default. When `AGENT_CANVAS_SHARED_MEMORY=0` skips compilation and no addon exists, native tests are explicitly skipped; use test:shm to require compilation and run them. Run native builds and their tests sequentially, not concurrently, because a rebuild temporarily removes the binary. Tests use unique fixture-owned shm objects and fake PTYs; the real-Pi driver uses a temporary agent directory, --no-session, no auto-discovered extensions, a diagnostic slash command and HTTP forbidden during the memory read. It checks production tool registration, invokes the read implementation, and receives an idle event through the native subscription controller, not a paid model-generated tool call. No live Canvas/persistence/agents are used. Python is used by a test-only corruption helper to verify incomplete initialization, invalid versions, interrupted sequence and invalid length handling.
+`npm test` and test:shm always build the addon first; environment variables cannot skip the build. A direct node --test run can still explicitly skip unbuilt native cases; it is not the full required validation. Run native builds and their tests sequentially, not concurrently, because a rebuild temporarily removes the binary. Tests use unique fixture-owned shm objects and fake PTYs; the real-Pi driver uses a temporary agent directory, --no-session, no auto-discovered extensions, a diagnostic slash command and HTTP forbidden during the memory read. It checks production tool registration, invokes the read implementation, and receives an idle event through the native subscription controller, not a paid model-generated tool call. No live Canvas/persistence/agents are used. Python is used by a test-only corruption helper to verify incomplete initialization, invalid versions, interrupted sequence and invalid length handling.

@@ -3,10 +3,6 @@ import { existsSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-if (process.argv.includes('--if-enabled') && process.env.AGENT_CANVAS_SHARED_MEMORY === '0') {
-  console.log('Canvas shared memory disabled; skipping native build.');
-  process.exit(0);
-}
 if (!['darwin', 'linux'].includes(process.platform)) throw new Error('Shared-memory prototype supports macOS/Linux only');
 const root = fileURLToPath(new URL('..', import.meta.url));
 const headers = resolve(dirname(process.execPath), '..');

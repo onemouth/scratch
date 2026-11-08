@@ -58,7 +58,7 @@ test('HTTP metadata queries omit terminal output and interactive source; dedicat
   } finally { await app.close(); }
 });
 
-test('removed HTTP wait routes return 404 without changing agents, including HTTP-only mode', async () => {
+test('removed HTTP wait routes return 404 without changing agents', async () => {
   const { app, agent, request } = await fixture();
   try {
     for (const method of ['POST', 'GET']) {
@@ -74,37 +74,23 @@ test('removed HTTP wait routes return 404 without changing agents, including HTT
     const denied = await request(`/agents/${agent.id}/wait`, 'POST', {}, { headers: { Origin: 'https://untrusted.example' } });
     assert.equal(denied.status, 403);
   } finally { await app.close(); }
-  const httpOnly = createApp({ port: 0, sharedMemory: false });
-  try {
-    await httpOnly.listen();
-    const response = await fetch(`http://127.0.0.1:${httpOnly.server.address().port}/api/agents/missing/wait`, {
-      method: 'POST', headers: { 'Content-Type': 'application/json' }, body: '{}',
-    });
-    assert.equal(response.status, 404);
-  } finally { await httpOnly.close(); }
+
 });
 
-test('HTTP-only activity reports still reject stale sequences and replaced process tokens without HTTP wait', async () => {
-  const { app, children, agent, request } = await fixture({ sharedMemory: false });
+test('retired HTTP callbacks and TTY messaging return 404; HTTP progress is rejected atomically', async () => {
+  const { app, children, agent, request } = await fixture();
   try {
-    const oldToken = children[0].options.env.AGENT_CANVAS_RUN;
-    const report = (state, seq, runToken = oldToken) => request(`/agents/${agent.id}/activity`, 'POST', { runToken, state, seq });
-    await report('working', 10); await report('idle', 9);
-    assert.equal((await request(`/agents/${agent.id}`)).body.activity, 'working');
-    await report('idle', 11); await report('working', 10);
-    assert.equal((await request(`/agents/${agent.id}`)).body.activity, 'idle');
-    await request(`/agents/${agent.id}/stop`, 'POST', {});
-    await request(`/agents/${agent.id}/resume`, 'POST', {});
-    assert.equal((await report('idle', 12)).status, 409);
-    assert.equal((await request(`/agents/${agent.id}`)).body.activity, 'unknown');
-    const newToken = children[1].options.env.AGENT_CANVAS_RUN;
-    assert.equal((await report('working', 1, newToken)).status, 200);
-    assert.equal((await request(`/agents/${agent.id}`)).body.activity, 'working');
-    const session = (sessionId, seq) => request(`/agents/${agent.id}/session`, 'POST', { runToken: newToken, sessionFile: null, sessionId, seq });
-    assert.equal((await session('newer', 10)).status, 200);
-    assert.equal((await session('late-older', 9)).status, 200);
-    assert.equal((await request(`/agents/${agent.id}`)).body.sessionId, 'newer');
-    assert.equal((await session('unsequenced', undefined)).status, 400);
+    for (const id of [agent.id, 'missing']) for (const kind of ['activity', 'session']) {
+      const response = await request(`/agents/${id}/${kind}`, 'POST', { state: 'working', sessionFile: null, sessionId: 'ignored', seq: 100 });
+      assert.equal(response.status, 404);
+    }
+    assert.equal((await request('/messages', 'POST', { toId: agent.id, text: 'Must not enter TTY' })).status, 404);
+    const before = (await request(`/agents/${agent.id}`)).body;
+    assert.equal((await request(`/agents/${agent.id}`, 'PATCH', { note: 'HTTP disabled', name: 'Do not apply', x: 9999 })).status, 400);
+    assert.deepEqual((await request(`/agents/${agent.id}`)).body, before);
+    assert.equal(before.activity, 'unknown'); assert.equal(before.note, '');
+    assert.equal(app.runtime.reportSession, undefined); assert.equal(app.runtime.reportActivity, undefined);
+    for (const env of ['AGENT_CANVAS_RUN', 'AGENT_CANVAS_TELEMETRY_TRANSPORT', 'AGENT_CANVAS_SHARED_MEMORY']) assert.equal(children[0].options.env[env], undefined);
   } finally { await app.close(); }
 });
 
