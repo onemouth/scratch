@@ -67,10 +67,10 @@ export function createCanvasOperations({
     if (isUnavailable()) return result(503, { error: 'Canvas is shutting down or resetting' });
     const cards = getCards(), views = getViews();
     const mediaSlot = path.match(new RegExp('^/api/cards/([^/]+)/media/(image|audio)$'));
-    if (path === '/api/agents' && method === 'GET') return result(200, { agents: runtime.list() });
-    const agentRead = path.match(/^\/api\/agents\/([^/]+)(?:\/(output))?$/);
-    if (agentRead && method === 'GET') return result(200, agentRead[2] === 'output' ? runtime.read(agentRead[1]) : runtime.get(agentRead[1]));
-    if (path === '/api/canvas/layout' && method === 'GET') return result(200, canvasLayout.snapshot());
+    const outputRead = path.match(/^\/api\/agents\/([^/]+)\/output$/);
+    if (outputRead && method === 'GET') return result(200, runtime.read(outputRead[1]));
+    // Precise metadata/layout reads are SHM-only; /state and PATCH stay HTTP.
+    if (method === 'GET' && (path === '/api/agents' || /^\/api\/agents\/[^/]+$/.test(path) || path === '/api/canvas/layout')) return result(404, { error: 'Not found' });
     const interactionMatch = path.match(/^\/api\/canvas\/layout-interactions\/(agent|note|card)\/([^/]+)$/);
     if (interactionMatch && method === 'POST') {
       if (!humanLayout) return result(403, { error: 'Layout interactions are reserved for browser gestures' });

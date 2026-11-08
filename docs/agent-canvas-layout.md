@@ -4,7 +4,7 @@ Agents may place and resize **any Agent Canvas agent, sticky note or card placem
 
 ## Read geometry
 
-`GET /api/canvas/layout` returns `{objects:[{kind,id,x,y,width,height,busy}]}`. Kinds are `agent`, `note`, and `card`; card IDs identify the Agent Canvas placement, not a Card Box view placement. The Card Box agent is excluded. Geometry is in unzoomed **canvas units**, not screen pixels. Negative positions are valid. Use this endpoint instead of inferring coordinates from screenshots or reading persistence files.
+canvas_layout({offset?,limit?}) returns {objects:[{kind,id,x,y,width,height,busy}],total,offset,nextOffset,source,serverEpoch,sampledAt} through dedicated SHM request/response queues. Default limit 20, maximum 100; follow nextOffset. Each page is an independent observation, not a reservation. GET /api/canvas/layout is removed (404). Kinds are `agent`, `note`, and `card`; card IDs identify the Agent Canvas placement, not a Card Box view placement. The Card Box agent is excluded. Geometry is in unzoomed **canvas units**, not screen pixels. Negative positions are valid. Use this tool instead of inferring coordinates from screenshots or reading persistence files.
 
 ## Create with optional geometry
 

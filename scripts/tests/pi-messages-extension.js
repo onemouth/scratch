@@ -2,6 +2,7 @@
 // a facade observes, then forwards each handoff to the actual Pi API.
 import messagesExtension from '../../server/pi-canvas-messages.js';
 import trackerExtension from '../../server/pi-session-tracker.js';
+import queryExtension from '../../server/pi-canvas-queries.js';
 export default function diagnostic(pi) {
   const tools = new Map();
   let context, contextReason;
@@ -9,6 +10,7 @@ export default function diagnostic(pi) {
     context = ctx; contextReason = event.reason;
     globalThis.fetch = () => { throw new Error('HTTP forbidden in SHM messaging smoke'); };
   });
+  queryExtension({ on: (...args) => pi.on(...args), registerTool: tool => { tools.set(tool.name, tool); pi.registerTool(tool); } });
   trackerExtension({ on: (...args) => pi.on(...args), registerTool: tool => { tools.set(tool.name, tool); pi.registerTool(tool); } });
   messagesExtension({
     on: (...args) => pi.on(...args),
@@ -19,7 +21,7 @@ export default function diagnostic(pi) {
     },
   });
   pi.on('session_start', (event, ctx) => {
-    for (const name of ['canvas_send_message', 'canvas_message_status', 'canvas_set_progress']) {
+    for (const name of ['canvas_send_message', 'canvas_message_status', 'canvas_set_progress', 'canvas_agents', 'canvas_layout']) {
       if (!pi.getAllTools().some(tool => tool.name === name)) throw new Error(`Missing production tool ${name}`);
     }
     ctx.ui.notify(`SHM_TELEMETRY_CONTEXT:${JSON.stringify({ reason: event.reason, sessionId: ctx.sessionManager.getSessionId(), sessionFile: ctx.sessionManager.getSessionFile() ?? null })}`, 'info');
@@ -47,6 +49,15 @@ export default function diagnostic(pi) {
     async handler(args, ctx) {
       const result = await tools.get('canvas_set_progress').execute('progress', { text: args }, undefined, undefined, ctx);
       ctx.ui.notify(`SHM_TELEMETRY_SENT:${JSON.stringify(result.details)}`, 'info');
+    },
+  });
+  pi.registerCommand('query-smoke', {
+    description: 'Invoke precise SHM queries without an LLM',
+    async handler(args, ctx) {
+      const agent = await tools.get('canvas_agents').execute('agent', { agentId: args.trim() }, undefined, undefined, ctx);
+      const layout = await tools.get('canvas_layout').execute('layout', {}, undefined, undefined, ctx);
+      if (agent.isError || layout.isError) throw new Error(JSON.stringify({ agent, layout }));
+      ctx.ui.notify(`SHM_QUERY_RESULT:${JSON.stringify({ agent: agent.details, layout: layout.details })}`, 'info');
     },
   });
   pi.registerCommand('telemetry-status', {

@@ -22,7 +22,7 @@ Returns `{ "agents": [...], "edges": [...], "notes": [...], "cards": [...], "car
 
 If this Pi process offers `canvas_read`, it can read paginated Canvas summaries directly from POSIX shared memory without HTTP. Optional parameters: `section` (`all`, `agents`, `edges`, `notes`, `cards`, `cardPlacements`), `offset` (default 0), `limit` (default 20, maximum 100). Follow each section's `nextOffset`. Results are bounded to 40 KB and include a generation and revision; notes/cards are summaries, not full source. Output, prompts, session tokens/paths, Interactive source/assets and Card Box view state are excluded. Metadata can lag its latest server mutation by the existing publication coalescing interval; this is not the full `/api/state` contract or an authoritative human-gesture lease check.
 
-SHM is required on macOS/Linux, requires a locally built native addon (npm startup commands build it automatically), and is passed to new/restored Pi processes. HTTP-only mode and its environment switch have been removed. Missing/stale/busy/incompatible memory returns an explicit tool error, never an implicit HTTP fallback. Keep using HTTP for this complete guide, mutations, authoritative layout/busy validation, terminal output and full card reads. Do not enable/restart services or relaunch other agents without permission. See [shared-memory setup and limits](shared-memory.md).
+SHM is required on macOS/Linux, requires a locally built native addon (npm startup commands build it automatically), and is passed to new/restored Pi processes. HTTP-only mode and its environment switch have been removed. Missing/stale/busy/incompatible memory returns an explicit tool error, never an implicit HTTP fallback. Use canvas_agents for precise Agent metadata and canvas_layout for current geometry/busy observations. Keep HTTP for this complete guide, /api/state, mutations (which atomically validate geometry/busy), terminal output and full card reads. Do not enable/restart services or relaunch other agents without permission. See [shared-memory setup and limits](shared-memory.md).
 
 ### Subscribe instead of waiting
 
@@ -32,21 +32,21 @@ Named-semaphore wakeups cause the extension to read the 256-record SHM journal, 
 
 ## Lightweight Agent queries, terminal output and waiting
 
-- `GET /api/agents` returns `{agents:[...]}` with metadata/status for every agent.
-- `GET /api/agents/:id` returns one agent's metadata/status, without loading the card library.
-- `GET /api/state` keeps its existing state shape, except Agent terminal output is now omitted. All three queries omit output; use the dedicated read endpoint rather than assuming output is empty. Browser SSE snapshots and terminal WebSocket replay are unchanged.
-- `GET /api/agents/:id/output` returns `{id,output,maxCharacters:80000}` for running or stopped agents. Output is the recent bounded **raw ANSI terminal tail**, not a complete conversation transcript. Truncation can start mid-escape-sequence. Reading does not clear it; Resume resets it as before. No arbitrary filesystem/transcript access is added. Missing targets return 404.
-- Collection/search/state responses still omit Interactive Card source. Read `GET /api/cards/:id` when full source is needed.
+- canvas_agents({offset?,limit?}) returns exact runtime metadata in {agents,total,offset,nextOffset}; canvas_agents({agentId}) returns {agent}. No output. Metadata can include complete task/session fields omitted from canvas_read summaries.
+- canvas_layout({offset?,limit?}) returns current geometry and busy flags in {objects,total,offset,nextOffset}. Each page is sampled independently by Scratch, with source, serverEpoch and sampledAt. Follow nextOffset; busy is not a reservation.
+- Default page size 20, maximum 100; response frames at most 60000 UTF-8 bytes. Byte limits may shorten pages; individual oversized records fail with QUERY_CAPACITY, never silent truncation. No automatic retry or HTTP fallback.
+- GET /api/agents, GET /api/agents/:id and GET /api/canvas/layout are removed (404). See [SHM query contract](agent-queries.md).
+- GET /api/state remains unchanged and omits terminal output. Browser SSE snapshots and terminal WebSocket replay are unchanged.
+- GET /api/agents/:id/output returns {id,output,maxCharacters:80000} for running or stopped agents. This is the recent bounded **raw ANSI terminal tail**, not a conversation transcript; truncation can start mid-escape-sequence. Reading does not clear it; Resume resets it. Missing targets return 404.
+- Collection/search/state responses omit Interactive Card source. Read GET /api/cards/:id when full source is needed.
 
 ```sh
-curl -fsS "$AGENT_CANVAS_URL/api/agents"
-curl -fsS "$AGENT_CANVAS_URL/api/agents/<AGENT_ID>"
 curl -fsS "$AGENT_CANVAS_URL/api/agents/<AGENT_ID>/output"
 ```
 
 ### Removed HTTP wait
 
-`POST /api/agents/:id/wait` is no longer supported (404). Use canvas_subscribe for future Agent events and canvas_read for current state. Subscribing to an already-idle agent does not synthesize a new event. External HTTP clients retain metadata/output queries but have no blocking wait or automatic subscription fallback.
+`POST /api/agents/:id/wait` is no longer supported (404). Use canvas_subscribe for future Agent events and canvas_read for current state. Subscribing to an already-idle agent does not synthesize a new event. External HTTP clients retain /api/state and output reads, but no dedicated metadata/layout GETs, blocking wait or automatic subscription fallback.
 
 ## Card box
 
@@ -115,7 +115,7 @@ For a request like “create a view about cryptography,” read current view met
 
 Agents may directly position/resize **any** Agent Canvas Card, Note or Agent, regardless of creator, without extra human confirmation. This permission covers geometry only, not someone else's content, agent lifecycle or deletion. Card Box remains human-layout-only.
 
-Read `GET /api/canvas/layout` for `{objects:[{kind,id,x,y,width,height,busy}]}` in unzoomed canvas units (negative positions allowed). When creating via `POST /api/agents`, `/api/notes`, or `/api/cards`, optional top-level `x,y,width,height` specify the Agent Canvas rectangle. Cards require `place:true` or omitted; `place:false` plus geometry is rejected. Without geometry, existing placement defaults are unchanged. Explicitly positioned API agent launches do not steal focus or move the viewport.
+Use canvas_layout({offset?,limit?}) for paginated {objects:[{kind,id,x,y,width,height,busy}],total,offset,nextOffset,source,serverEpoch,sampledAt} in unzoomed canvas units (negative positions allowed). When creating via `POST /api/agents`, `/api/notes`, or `/api/cards`, optional top-level `x,y,width,height` specify the Agent Canvas rectangle. Cards require `place:true` or omitted; `place:false` plus geometry is rejected. Without geometry, existing placement defaults are unchanged. Explicitly positioned API agent launches do not steal focus or move the viewport.
 
 Update one object via `PATCH /api/agents/:id`, `/api/notes/:id`, or `/api/card-placements/:id`. Omitted geometry is preserved. Minimum sizes: agent 320×240, note 160×160, Markdown card 240×240, interactive card 320×240. No batch operation or undo is provided. Existing-object API layout changes do not pan/zoom the human's view.
 
@@ -210,7 +210,7 @@ On server restart, previously running agents reopen their recorded session witho
 
 `POST /api/canvas/reset` with `{"confirm":true}` stops only Agent Canvas agents and clears its nodes/notes/edges/placements. The Card box agent, layouts and library are preserved. **Only do this when the user explicitly requests resetting the entire Canvas.** Pi sessions and project files are not deleted. The browser provides confirmation; API clients must obtain user confirmation themselves.
 
-`POST /api/agents/:id/session` and `/activity` are removed (404). Session identity and working/idle reports are automatic through the process-scoped SHM telemetry channel only; there is no HTTP-only mode. Channel identity/generation and monotonic process-wide sequences fence stale reports. `sessionFile` and `sessionId` identify the conversation, not the Canvas node, and stay private.
+`POST /api/agents/:id/session` and `/activity` are removed (404). Session identity and working/idle reports are automatic through the process-scoped SHM telemetry channel only; there is no HTTP-only mode. Channel identity/generation and monotonic process-wide sequences fence stale reports. `sessionFile` and `sessionId` identify the conversation, not the Canvas node, and are excluded from public awareness snapshots; explicit metadata queries may return them.
 
 ## Other interfaces and boundaries
 

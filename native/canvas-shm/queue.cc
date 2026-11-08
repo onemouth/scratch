@@ -16,7 +16,7 @@ extern bool nameArg(napi_env, napi_value, std::string&);
 extern bool args(napi_env, napi_callback_info, size_t, napi_value*);
 namespace {
 constexpr uint64_t MAGIC = 0x5343534851554531ULL, VERSION = 1, SLOTS = 16, MAX_SEQ = 9007199254740991ULL;
-constexpr size_t HEADER = 128;
+constexpr size_t HEADER = 128, MAX_BYTES = 65536;
 enum Field { Magic, Version, Bytes, State, Head, Tail, Producer, Consumer };
 static_assert(__atomic_always_lock_free(8, nullptr), "Shared queues require lock-free 64-bit atomics");
 struct Queue { void* ptr; size_t size; bool owner, producer; std::string name; uint64_t bytes; };
@@ -81,7 +81,7 @@ napi_value number(napi_env env, uint64_t value) {
 napi_value QueueCreate(napi_env env, napi_callback_info info) {
   napi_value a[3]; std::string name; bool producer; double bytes;
   if (!args(env, info, 3, a) || !nameArg(env, a[0], name) || !role(env, a[1], producer)) return nullptr;
-  if (napi_get_value_double(env, a[2], &bytes) != napi_ok || (bytes != 1024 && bytes != 16384)) return fail(env, "SHM_ARGUMENT", "Queue slot size must be 1024 or 16384");
+  if (napi_get_value_double(env, a[2], &bytes) != napi_ok || (bytes != 1024 && bytes != 16384 && bytes != MAX_BYTES)) return fail(env, "SHM_ARGUMENT", "Queue slot size must be 1024, 16384 or 65536");
   size_t size = HEADER + SLOTS * (8 + size_t(bytes));
   int fd = shm_open(name.c_str(), O_CREAT | O_EXCL | O_RDWR, 0600);
   if (fd < 0) return fail(env, errno == EEXIST ? "SHM_EXISTS" : "SHM_SYSTEM", strerror(errno));
@@ -101,7 +101,7 @@ napi_value QueueOpen(napi_env env, napi_callback_info info) {
   if (fd < 0) return fail(env, errno == ENOENT ? "SHM_MISSING" : "SHM_SYSTEM", strerror(errno));
   struct stat st{};
   if (fstat(fd, &st) != 0) { int e = errno; close(fd); return fail(env, "SHM_SYSTEM", strerror(e)); }
-  size_t page = size_t(getpagesize()), maxSize = ((HEADER + SLOTS * (8 + 16384) + page - 1) / page) * page;
+  size_t page = size_t(getpagesize()), maxSize = ((HEADER + SLOTS * (8 + MAX_BYTES) + page - 1) / page) * page;
   if (st.st_uid != getuid() || (st.st_mode & 0077)) { close(fd); return fail(env, "SHM_PERMISSIONS", "Expected owner-only queue"); }
   if (st.st_size < off_t(HEADER + SLOTS * (8 + 1024)) || st.st_size > off_t(maxSize) || st.st_size % 8) {
     close(fd); return fail(env, "SHM_VERSION", "Invalid queue mapping size");
@@ -117,7 +117,7 @@ napi_value QueueOpen(napi_env env, napi_callback_info info) {
     return fail(env, state == 2 ? "SHM_CLOSED" : "SHM_NOT_READY", "Queue generation closed or not initialized");
   }
   if (load(h + Magic) != MAGIC || load(h + Version) != VERSION ||
-      (bytes != 1024 && bytes != 16384) || HEADER + SLOTS * (8 + bytes) > size) {
+      (bytes != 1024 && bytes != 16384 && bytes != MAX_BYTES) || HEADER + SLOTS * (8 + bytes) > size) {
     munmap(ptr, size); delete q; return fail(env, "SHM_VERSION", "Incompatible or closed queue");
   }
   q->bytes = bytes;
@@ -190,6 +190,10 @@ napi_value QueueClose(napi_env env, napi_callback_info info) {
   dispose(q); return a[0];
 }
 void InitQueues(napi_env env, napi_value exports) {
+  napi_value maxBytes;
+  if (napi_create_uint32(env, MAX_BYTES, &maxBytes) != napi_ok || napi_set_named_property(env, exports, "queueMaxBytes", maxBytes) != napi_ok) {
+    fail(env, "SHM_ALLOC", "Cannot export queue capacity"); return;
+  }
   const napi_property_descriptor methods[] = {
     {"queueCreate", nullptr, QueueCreate, nullptr, nullptr, nullptr, napi_default, nullptr},
     {"queueOpen", nullptr, QueueOpen, nullptr, nullptr, nullptr, napi_default, nullptr},

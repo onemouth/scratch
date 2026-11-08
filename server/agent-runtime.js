@@ -9,7 +9,7 @@ const failure = (message, status = 400) => Object.assign(new Error(message), { s
 
 // Owns process/run/activity state. Domain operations own canvas records; HTTP
 // and terminal transport never implement process/session semantics.
-export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate, getMemory = () => null, getMessaging = () => null, getTelemetry = () => null, onChange = () => {} }) {
+export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate, getMemory = () => null, getMessaging = () => null, getTelemetry = () => null, getQueries = () => null, onChange = () => {} }) {
   const processes = new Map(), runs = new Map(), activity = new Map();
   const notify = onChange;
   const requireAgent = id => {
@@ -49,15 +49,18 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
     let child;
     try {
       const memory = getMemory();
-      if (!memory || !getMessaging() || !getTelemetry()) throw new Error('SHM channels are required');
+      if (!memory || !getMessaging() || !getTelemetry() || !getQueries()) throw new Error('SHM channels are required');
       const notifier = memory.createNotifier();
       runs.get(id).notifier = notifier;
       const messages = getMessaging().createChannel(id, runs.get(id).generation);
       runs.get(id).messages = messages;
       const telemetry = getTelemetry().createChannel(id, runs.get(id).generation);
       runs.get(id).telemetry = telemetry;
+      const queries = getQueries().createChannel(id, runs.get(id).generation);
+      runs.get(id).queries = queries;
       const common = ['--tui-mode', 'regular', '--extension', join(root, 'server', 'pi-session-tracker.js'),
         '--extension', join(root, 'server', 'pi-canvas-memory.js'),
+        '--extension', join(root, 'server', 'pi-canvas-queries.js'),
         '--extension', join(root, 'server', 'pi-canvas-messages.js'), '--skill', join(root, 'skills', 'agent-canvas', 'SKILL.md'), '--append-system-prompt', instructions];
       const args = restoring
         ? [...(exactSession ? ['--session', agent.sessionFile] : ['--resume']), ...common]
@@ -69,9 +72,11 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
         env: { ...environment, TERM: 'xterm-256color', PI_IMAGE_PROTOCOL: 'none', AGENT_CANVAS_URL: base, AGENT_CANVAS_ID: id,
           AGENT_CANVAS_SHM_NAME: memory.name, AGENT_CANVAS_SHM_EPOCH: memory.epoch, AGENT_CANVAS_SHM_NOTIFY: notifier.name,
           AGENT_CANVAS_SHM_MESSAGES: JSON.stringify(messages.config),
-          AGENT_CANVAS_SHM_TELEMETRY: JSON.stringify(telemetry.config) },
+          AGENT_CANVAS_SHM_TELEMETRY: JSON.stringify(telemetry.config),
+          AGENT_CANVAS_SHM_QUERIES: JSON.stringify(queries.config) },
       });
     } catch (error) {
+      runs.get(id)?.queries?.close();
       runs.get(id)?.telemetry?.close();
       runs.get(id)?.messages?.close();
       runs.get(id)?.notifier?.close();
@@ -93,6 +98,7 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
       const wasStopping = agent.status === 'stopping';
       agent.status = 'stopped';
       notify(); // Observe the old run ending even if restore immediately replaces it.
+      run?.queries?.close();
       run?.telemetry?.close();
       run?.messages?.close();
       run?.notifier?.close();

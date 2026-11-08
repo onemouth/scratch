@@ -23,13 +23,13 @@ async function fixture(options = {}) {
   return { app, children, agent, base, request };
 }
 
-test('HTTP metadata queries omit terminal output and interactive source; dedicated reads retain the bounded ANSI tail', async () => {
+test('HTTP state queries omit terminal output and interactive source; dedicated reads retain the bounded ANSI tail', async () => {
   const { app, children, agent, request, base } = await fixture();
   try {
     const output = '\x1b[32m' + 'TERMINAL_ONLY_MARKER'.repeat(5000) + '\x1b[0m';
     children[0].emit('data', output);
     const card = (await request('/cards', 'POST', { type: 'interactive', title: 'Query source', html: '<svg></svg>', javascript: '/* SOURCE_ONLY_MARKER */', place: false })).body;
-    for (const path of ['/state', '/agents', `/agents/${agent.id}`]) {
+    for (const path of ['/state']) {
       const res = await request(path);
       assert.equal(res.status, 200);
       const agents = res.body.agents ?? [res.body];
@@ -68,7 +68,7 @@ test('removed HTTP wait routes return 404 without changing agents', async () => 
         assert.equal(typeof response.body.error, 'string');
       }
     }
-    assert.equal((await request(`/agents/${agent.id}`)).body.status, 'running');
+    assert.equal(app.runtime.get(agent.id).status, 'running');
     assert.equal('wait' in app.runtime, false);
     assert.equal('waiterCount' in app.runtime, false);
     const denied = await request(`/agents/${agent.id}/wait`, 'POST', {}, { headers: { Origin: 'https://untrusted.example' } });
@@ -85,9 +85,9 @@ test('retired HTTP callbacks and TTY messaging return 404; HTTP progress is reje
       assert.equal(response.status, 404);
     }
     assert.equal((await request('/messages', 'POST', { toId: agent.id, text: 'Must not enter TTY' })).status, 404);
-    const before = (await request(`/agents/${agent.id}`)).body;
+    const before = app.runtime.get(agent.id);
     assert.equal((await request(`/agents/${agent.id}`, 'PATCH', { note: 'HTTP disabled', name: 'Do not apply', x: 9999 })).status, 400);
-    assert.deepEqual((await request(`/agents/${agent.id}`)).body, before);
+    assert.deepEqual(app.runtime.get(agent.id), before);
     assert.equal(before.activity, 'unknown'); assert.equal(before.note, '');
     assert.equal(app.runtime.reportSession, undefined); assert.equal(app.runtime.reportActivity, undefined);
     for (const env of ['AGENT_CANVAS_RUN', 'AGENT_CANVAS_TELEMETRY_TRANSPORT', 'AGENT_CANVAS_SHARED_MEMORY']) assert.equal(children[0].options.env[env], undefined);

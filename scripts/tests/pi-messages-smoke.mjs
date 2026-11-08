@@ -10,9 +10,11 @@ import assert from 'node:assert/strict';
 import { createCanvasMemory } from '../../server/canvas-memory.js';
 import { createCanvasMessaging } from '../../server/canvas-messages.js';
 import { createCanvasTelemetry } from '../../server/canvas-telemetry.js';
+import { createCanvasQueries } from '../../server/canvas-queries.js';
+import { queryPage } from '../../shared/canvas-queries.js';
 
 const directory = await mkdtemp(join(tmpdir(), 'canvas-messages-pi-'));
-const state = { agents: ['a', 'b'].map(id => ({ id, name: id, status: 'running', activity: 'idle', processGeneration: randomUUID() })), edges: [], notes: [], cards: [], cardPlacements: [] };
+const state = { agents: ['a', 'b'].map(id => ({ id, name: id, task: '🧋'.repeat(5000), status: 'running', activity: 'idle', processGeneration: randomUUID() })), edges: [], notes: [], cards: [], cardPlacements: [] };
 const memory = createCanvasMemory({ getState: () => state });
 const errors = [];
 const router = createCanvasMessaging({ epoch: memory.epoch, getAgent: id => state.agents.find(agent => agent.id === id), onError: error => errors.push(error) });
@@ -30,6 +32,13 @@ function waitReport(predicate) {
     telemetryBus.on('report', check);
   });
 }
+let busy = true;
+const queries = createCanvasQueries({ epoch: memory.epoch, onError: error => errors.push(error), execute(id, generation, kind, params) {
+  assert.equal(generation, state.agents.find(agent => agent.id === id).processGeneration);
+  if (kind === 'agent') return { agent: state.agents.find(agent => agent.id === params.agentId) };
+  if (kind === 'agents') return queryPage('agents', state.agents, params);
+  return queryPage('objects', [{ kind: 'agent', id: 'a', x: 0, y: 0, width: 440, height: 320, busy }], params);
+} });
 const peers = [];
 function waitFor(peer, predicate, after = 0) {
   const existing = peer.events.slice(after).find(predicate);
@@ -51,12 +60,13 @@ try {
     const cwd = join(directory, agent.id); await mkdir(cwd);
     const channel = router.createChannel(agent.id, agent.processGeneration);
     const telemetryChannel = telemetry.createChannel(agent.id, agent.processGeneration);
+    const queryChannel = queries.createChannel(agent.id, agent.processGeneration);
     const child = spawn('pi', ['--mode', 'rpc', '--no-session', '--no-extensions', '--no-skills', '--no-prompt-templates',
       '--extension', fileURLToPath(new URL('./pi-messages-extension.js', import.meta.url))], {
       cwd, stdio: ['pipe', 'pipe', 'pipe'],
       env: { ...process.env, PI_CODING_AGENT_DIR: cwd, AGENT_CANVAS_URL: '', AGENT_CANVAS_ID: agent.id,
         AGENT_CANVAS_SHM_NAME: memory.name, AGENT_CANVAS_SHM_EPOCH: memory.epoch, AGENT_CANVAS_SHM_MESSAGES: JSON.stringify(channel.config),
-        AGENT_CANVAS_SHM_TELEMETRY: JSON.stringify(telemetryChannel.config) },
+        AGENT_CANVAS_SHM_TELEMETRY: JSON.stringify(telemetryChannel.config), AGENT_CANVAS_SHM_QUERIES: JSON.stringify(queryChannel.config) },
     });
     const peer = { id: agent.id, child, events: [], bus: new EventEmitter(), stderr: '', failure: null };
     peers.push(peer); peer.exit = once(child, 'exit'); peer.exit.catch(() => {});
@@ -106,6 +116,17 @@ try {
     assert.equal(status.status, 'applied');
     return sent;
   }
+  async function preciseQuery(peer) {
+    const start = peer.events.length;
+    command(peer, `query-${++sequence}`, '/query-smoke b');
+    const result = JSON.parse((await notify(peer, 'SHM_QUERY_RESULT:', start)).message.slice('SHM_QUERY_RESULT:'.length));
+    assert.equal(result.agent.agent.id, 'b');
+    assert.equal(result.agent.agent.task, state.agents[1].task); // >16 KiB, not truncated.
+    assert.equal(result.agent.source, 'posix-shared-memory');
+    assert.equal(result.layout.objects[0].busy, busy);
+    assert.equal(result.layout.serverEpoch, memory.epoch);
+  }
+  await preciseQuery(a);
   const initialProgress = await progress(a, 'startup');
   await Promise.all(peers.map(peer => waitReport(frame => frame.id === peer.id && frame.kind === 'activity' && frame.data.state === 'idle')));
   const original = await exchange(a, b, 'initial');
@@ -135,6 +156,7 @@ try {
     const retained = JSON.parse((await notify(a, 'SHM_TELEMETRY_STATUS:', statusStart)).message.slice('SHM_TELEMETRY_STATUS:'.length));
     assert.equal(retained.status, 'applied');
     await progress(a, reason);
+    busy = !busy; await preciseQuery(a);
     const result = await pending;
     assert.equal(result.inbound.contextReason, reason, 'Message used a stale Pi API');
     const receiptStart = a.events.length;
@@ -155,9 +177,9 @@ try {
   try { for (const peer of peers) assert.equal((await peer.exit)[0], 0); }
   finally { clearTimeout(timeout); }
   assert.deepEqual(errors, []);
-  console.log('Two real Pi processes exchanged SHM messages/receipts across reload, new, resume and fork, including messages queued during handoff and retained receipt history. Actual current-context Pi API handoffs; no HTTP or LLM run. Dedicated telemetry also reported real current session identity/activity/progress with monotonic process sequences and retained receipts across all four transitions. Only disposable fixture sessions, removed after test.');
+  console.log('Two real Pi processes exchanged SHM messages/receipts across reload, new, resume and fork, including messages queued during handoff and retained receipt history. Actual current-context Pi API handoffs; no HTTP or LLM run. Dedicated telemetry also reported real current session identity/activity/progress with monotonic process sequences and retained receipts across all four transitions. Precise SHM metadata (>16 KiB) and freshly sampled layout/busy also passed through production query tools across all four transitions. Only disposable fixture sessions, removed after test.');
 } finally {
   for (const peer of peers) if (peer.child.exitCode === null && peer.child.signalCode === null) peer.child.kill('SIGKILL');
   await Promise.allSettled(peers.map(peer => peer.exit));
-  telemetry.close(); router.close(); memory.close(); await rm(directory, { recursive: true, force: true });
+  queries.close(); telemetry.close(); router.close(); memory.close(); await rm(directory, { recursive: true, force: true });
 }

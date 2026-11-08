@@ -52,9 +52,9 @@ Pi → Scratch telemetry uses a separate process-scoped SHM channel for activity
 
 ## Agent status and output
 
-Agent lifecycle, layout and content control remain HTTP/curl. `GET /api/agents` lists lightweight metadata, and `GET /api/agents/:id` reads one agent. These queries and `GET /api/state` omit terminal output; **`GET /api/agents/:id/output` still reads the recent raw ANSI tail** (up to 80,000 characters) when needed. Interactive source remains excluded from lists/state and is available through the full card endpoint. Browser SSE/terminal replay and saved output are unchanged.
+Agent lifecycle, layout mutations and content control remain HTTP/curl. Precise metadata uses canvas_agents (list or agentId); current geometry/busy uses canvas_layout. The former GET /api/agents, GET /api/agents/:id and GET /api/canvas/layout are removed (404). GET /api/state remains unchanged and omits terminal output; **`GET /api/agents/:id/output` still reads the recent raw ANSI tail** (up to 80,000 characters) when needed. Interactive source remains excluded from lists/state and is available through the full card endpoint. Browser SSE/terminal replay and saved output are unchanged.
 
-Use shared-memory subscriptions for future events, not HTTP wait. Idle does not prove task success. External HTTP clients retain metadata/output queries, but no blocking wait or TTY messaging endpoint. See the [Agent API guide](docs/agent-api.md). No new error format, UDS transport or persistence migration is introduced.
+Use shared-memory subscriptions for future events, not HTTP wait. Idle does not prove task success. External HTTP clients retain /api/state and output reads, but no dedicated metadata/layout GETs, blocking wait or TTY messaging endpoint. See the [Agent API guide](docs/agent-api.md) and [SHM query contract](docs/agent-queries.md). No new error format, UDS transport or persistence migration is introduced.
 
 ## Agent-controlled layout
 

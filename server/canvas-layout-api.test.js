@@ -2,12 +2,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { EventEmitter } from 'node:events';
 import { createApp } from './index.js';
+import { queryFixture } from '../scripts/tests/query-fixture.js';
 
 function spawnFixture() {
   const children = [];
-  return { children, spawn: () => {
+  return { children, spawn: (_bin, _args, options) => {
     const child = new EventEmitter();
-    Object.assign(child, { onData: fn => child.on('data', fn), onExit: fn => child.on('exit', fn), kill: () => child.emit('exit', { exitCode: 0 }) });
+    Object.assign(child, { options, onData: fn => child.on('data', fn), onExit: fn => child.on('exit', fn), kill: () => child.emit('exit', { exitCode: 0 }) });
     children.push(child); return child;
   } };
 }
@@ -61,7 +62,7 @@ test('Agent Canvas creation/updates validate collisions atomically and preserve 
     assert.equal((await request(`/cards/${libraryOnly.id}/placement`, 'POST', { x: 1500, y: 0 })).status, 200);
     const box = (await request('/card-box/agent', 'POST', {})).data;
     assert.equal((await request(`/agents/${box.id}`, 'PATCH', { x: 3000 })).status, 403);
-    const layout = (await request('/canvas/layout')).data;
+    const layout = await queryFixture(fixture.children[0]).query('layout');
     assert.ok(!layout.objects.some(o => o.id === box.id));
     assert.ok(layout.objects.some(o => o.kind === 'card' && o.id === card.id));
     // No explicit layout retains old defaults, even when they overlap.

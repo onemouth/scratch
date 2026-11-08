@@ -17,6 +17,8 @@ import { createHttpHandler, reply } from './http-routes.js';
 import { attachTerminalTransport } from './terminal-transport.js';
 import { createCanvasMemory } from './canvas-memory.js';
 import { createCanvasMessaging } from './canvas-messages.js';
+import { createCanvasQueries } from './canvas-queries.js';
+import { queryError, queryPage } from '../shared/canvas-queries.js';
 import { createCanvasTelemetry } from './canvas-telemetry.js';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
@@ -44,7 +46,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   function geometry({ id, x, y, width, height }) { return { id, x, y, width, height }; }
   let views;
   let cards;
-  let memory, messaging, telemetry;
+  let memory, messaging, telemetry, queries;
   const clients = new Set();
   const terminals = new Map();
   let pending = false;
@@ -98,6 +100,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     getMemory: () => memory,
     getMessaging: () => messaging,
     getTelemetry: () => telemetry,
+    getQueries: () => queries,
     onChange: () => memory?.observeAgents(),
   });
   const { startAgent, stopProcesses } = runtime;
@@ -151,8 +154,16 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
         messaging = createCanvasMessaging({ epoch: memory.epoch,
           getAgent: id => agents.has(id) ? runtime.describe(agents.get(id)) : null });
         telemetry = createCanvasTelemetry({ epoch: memory.epoch, apply: runtime.applyTelemetry });
+        queries = createCanvasQueries({ epoch: memory.epoch, execute(id, generation, kind, params) {
+          if (closing || resetting) throw queryError('QUERY_UNAVAILABLE', 'Canvas is shutting down or resetting');
+          const requester = runtime.get(id);
+          if (requester.status !== 'running' || requester.processGeneration !== generation) throw queryError('QUERY_GENERATION', 'Stale query process');
+          if (kind === 'agent') return { agent: runtime.get(params.agentId) };
+          if (kind === 'agents') return queryPage('agents', runtime.list(), params);
+          return queryPage('objects', canvasLayout.snapshot().objects, params);
+        } });
         await new Promise((resolveListen, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolveListen); });
-      } catch (error) { telemetry?.close(); messaging?.close(); memory?.close(); cards.close(); unlockCards(); unlock(); throw error; }
+      } catch (error) { queries?.close(); telemetry?.close(); messaging?.close(); memory?.close(); cards.close(); unlockCards(); unlock(); throw error; }
       started = true;
       for (const agent of agents.values()) {
         if (agent.status !== 'running') { agent.status = 'stopped'; continue; }
@@ -165,7 +176,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       if (closePromise) return closePromise;
       flush(); // Save running intent BEFORE shutdown kills change process status.
       closing = true;
-      telemetry?.close(); messaging?.close(); memory?.close();
+      queries?.close(); telemetry?.close(); messaging?.close(); memory?.close();
       closePromise = (async () => {
         for (const client of clients) client.end();
         for (const group of terminals.values()) for (const ws of group) ws.terminate();
