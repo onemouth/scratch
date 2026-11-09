@@ -17,6 +17,8 @@ import { TELEMETRY_VERSION, validateTelemetryData } from '../shared/canvas-telem
 import tracker from './pi-session-tracker.js';
 import { createApp } from './index.js';
 import { openCanvasMemory } from '../shared/canvas-memory.js';
+import { bindTelemetryProcess, detachTelemetryProcess } from './pi-telemetry-process.js';
+import { bindMessageProcess, detachMessageProcess } from './pi-message-process.js';
 
 const built = ['darwin', 'linux'].includes(process.platform) && existsSync(new URL('../native/canvas-shm/build/Release/canvas_shm.node', import.meta.url));
 const nativeTest = (name, fn) => test(name, { skip: built ? false : 'Run npm run test:shm to build the native addon' }, fn);
@@ -38,9 +40,9 @@ const errorCode = code => error => error.code === code;
 // Only our fresh, private fixture name; never touch a live publisher.
 const staleHeartbeat = memory => execFileSync('python3', [new URL('../scripts/tests/shm-corrupt.py', import.meta.url).pathname, 'field', memory.name, '6', '0']);
 function trackerInstance() {
-  const hooks = new Map(), tools = new Map(), warnings = [];
+  const hooks = new Map(), tools = new Map(), warnings = [], statuses = [];
   tracker({ on: (name, fn) => hooks.set(name, fn), registerTool: tool => tools.set(tool.name, tool) });
-  return { hooks, tools, context: id => ({ mode: 'tui', hasUI: true, isIdle: () => true, ui: { notify: (...args) => warnings.push(args) }, sessionManager: { getSessionFile: () => `/owned/${id}.jsonl`, getSessionId: () => id } }), warnings };
+  return { hooks, tools, context: id => ({ mode: 'tui', hasUI: true, isIdle: () => true, ui: { notify: (...args) => warnings.push(args), setStatus: (...args) => statuses.push(args) }, sessionManager: { getSessionFile: () => `/owned/${id}.jsonl`, getSessionId: () => id } }), warnings, statuses };
 }
 
 nativeTest('telemetry uses real independent queues, inferred identity, bounded reports and applied receipts', () => {
@@ -223,7 +225,8 @@ nativeTest('wake refresh samples the current binding, waits for credits, and nev
     f.service.drain(); client.drain(); f.frames.length = 0;
     for (let i = 0; i < 16; i++) broker.publish('progress', { text: `Do not replay ${i}` });
     staleHeartbeat(f.memory); client.drain();
-    assert.match(old.warnings.at(-1)[0], /paused.*SHM_STALE/);
+    assert.deepEqual(old.warnings, []);
+    assert.match(old.statuses.at(-1)[1], /Canvas paused: telemetry/);
     old.hooks.get('session_shutdown')({ reason: 'reload' });
     const current = trackerInstance(), ctx = current.context('current-session');
     let idle = true, session = 'during-sleep';
@@ -245,7 +248,8 @@ nativeTest('wake refresh samples the current binding, waits for credits, and nev
       ['session', 19, { sessionFile: '/owned/latest-at-recovery.jsonl', sessionId: 'latest-at-recovery' }],
       ['activity', 20, { state: 'working' }],
     ]);
-    assert.equal(current.warnings.filter(([message]) => message.includes('heartbeat recovered')).length, 1);
+    assert.deepEqual(current.warnings, []);
+    assert.equal(current.statuses.at(-1)[1], undefined);
     client.drain(); f.service.drain(); assert.equal(f.frames.length, 2, 'no repeated recovery reports');
     const progress = await current.tools.get('canvas_set_progress').execute('new', { text: 'New progress after wake' });
     f.service.drain(); client.drain();
@@ -263,6 +267,51 @@ nativeTest('wake refresh samples the current binding, waits for credits, and nev
     assert.equal(f.frames.at(-1).data.sessionId, 'after-detached-wake');
     assert.equal(broker.refreshPending, false);
   } finally { process[key]?.close(); globalThis.fetch = originalFetch; process.env = saved; f.close(); }
+});
+
+nativeTest('production brokers quietly aggregate actual heartbeat pauses, detached recovery and fatal fencing', () => {
+  const f = fixture(), notices = [], statuses = [], oldStatuses = [];
+  const router = createCanvasMessaging({ epoch: f.memory.epoch, getAgent: id => f.state.agents.find(agent => agent.id === id) });
+  const channel = router.createChannel('a', f.state.agents[0].processGeneration);
+  const owner = Symbol('initial'), replacement = Symbol('replacement');
+  let telemetry, messaging;
+  const initial = { hasUI: true, ui: { notify: (...args) => notices.push(args), setStatus: (...args) => oldStatuses.push(args) } };
+  const current = { hasUI: true, ui: { notify: (...args) => notices.push(args), setStatus: (...args) => statuses.push(args) } };
+  const bind = (ctx, owner) => {
+    telemetry = bindTelemetryProcess({ config: f.channel.config, name: f.memory.name, epoch: f.memory.epoch, id: 'a', ctx, owner });
+    messaging = bindMessageProcess({ config: channel.config, name: f.memory.name, epoch: f.memory.epoch, pi: { sendMessage() { assert.fail('Unexpected message'); } }, ctx, owner });
+  };
+  try {
+    bind(initial, owner);
+    const originalTelemetry = telemetry.client, originalMessaging = messaging.client;
+    for (let i = 0; i < 5; i++) {
+      staleHeartbeat(f.memory); telemetry.client.drain(); messaging.client.drain();
+      assert.match(oldStatuses.at(-1)[1], /Canvas paused: telemetry, messaging/);
+      assert.throws(() => telemetry.publish('progress', { text: 'Not buffered' }), { code: 'SHM_STALE' });
+      assert.throws(() => messaging.client.send({ agentId: 'b', text: 'Not buffered' }), { code: 'SHM_STALE' });
+      f.memory.publish(); telemetry.client.drain();
+      assert.equal(oldStatuses.at(-1)[1], 'Canvas paused: messaging');
+      messaging.client.drain();
+      assert.equal(oldStatuses.at(-1)[1], undefined);
+    }
+    staleHeartbeat(f.memory); telemetry.client.drain(); messaging.client.drain();
+    detachTelemetryProcess(telemetry, owner, 'reload'); detachMessageProcess(messaging, owner, 'reload');
+    const oldCount = oldStatuses.length;
+    f.memory.publish(); telemetry.client.drain(); messaging.client.drain();
+    assert.equal(oldStatuses.length, oldCount, 'Detached recovery must not use old UI');
+    bind(current, replacement);
+    assert.equal(telemetry.client, originalTelemetry); assert.equal(messaging.client, originalMessaging);
+    assert.equal(statuses.at(-1)[1], undefined);
+    detachTelemetryProcess(telemetry, owner, 'quit'); detachMessageProcess(messaging, owner, 'quit');
+    assert.equal(telemetry.client.closed, false); assert.equal(messaging.client.closed, false);
+    f.memory.close(); telemetry.client.drain(); messaging.client.drain();
+    assert.match(statuses.at(-1)[1], /Canvas error:.*telemetry SHM_MISSING.*messaging SHM_MISSING/);
+    assert.equal(telemetry.client.fenced, true); assert.equal(messaging.client.fenced, true);
+    assert.throws(() => telemetry.publish('progress', { text: 'Fenced' }), { code: 'TELEMETRY_CHANNEL_FENCED' });
+    assert.throws(() => messaging.client.send({ agentId: 'b', text: 'Fenced' }), { code: 'MESSAGE_CHANNEL_FENCED' });
+    assert.deepEqual(notices, []);
+    assert.equal(oldStatuses.length, oldCount);
+  } finally { telemetry?.close(); messaging?.close(); router.close(); f.close(); }
 });
 
 nativeTest('transient snapshot failures pause telemetry without closing process resources', () => {

@@ -33,6 +33,14 @@ export default function diagnostic(pi) {
     // Fixture-only handoff window: messages arrive while no Pi API is bound.
     await new Promise(resolve => setTimeout(resolve, 250));
   });
+  pi.registerCommand('transport-drain', {
+    description: 'Drain the actual process transports for isolated heartbeat/status testing',
+    handler(_args, ctx) {
+      process[Symbol.for('agent-canvas.telemetry.process.v1')].client.drain();
+      process[Symbol.for('agent-canvas.messaging.process.v1')].client.drain();
+      ctx.ui.notify('SHM_TRANSPORT_DRAINED', 'info');
+    },
+  });
   pi.registerCommand('message-reload', {
     description: 'Reload the real extension runtime without an LLM',
     async handler(_args, ctx) { await ctx.reload(); return; },
