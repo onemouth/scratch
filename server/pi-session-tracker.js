@@ -1,5 +1,6 @@
 import { bindTelemetryProcess, detachTelemetryProcess, warnTelemetry } from './pi-telemetry-process.js';
 import { telemetryError } from '../shared/canvas-telemetry.js';
+import { bindCanvasStatus, detachCanvasStatus, setCanvasStatus } from './pi-canvas-status.js';
 
 // Loaded explicitly by Canvas-launched Pi processes. Reports session identity
 // and turn state; never sends a prompt or resumes interrupted work.
@@ -43,6 +44,7 @@ export default function sessionTracker(pi) {
   });
   pi.on('session_start', async (_event, ctx) => {
     if (!['tui', 'rpc'].includes(ctx.mode)) return;
+    bindCanvasStatus('telemetry', owner, ctx);
     try {
       const config = JSON.parse(process.env.AGENT_CANVAS_SHM_TELEMETRY);
       broker = bindTelemetryProcess({ config, id, ctx, owner,
@@ -55,10 +57,13 @@ export default function sessionTracker(pi) {
       publish('activity', { state: ctx.isIdle() === false ? 'working' : 'idle' });
       await publish('session', { sessionFile: ctx.sessionManager.getSessionFile() ?? null, sessionId: ctx.sessionManager.getSessionId() });
     } catch (error) {
-      if (ctx.hasUI) ctx.ui.notify(`Canvas telemetry unavailable: ${error.code ?? 'TELEMETRY_CONFIG'}. No HTTP fallback.`, 'warning');
+      setCanvasStatus('telemetry', owner, { code: error.code ?? 'TELEMETRY_CONFIG', fatal: true });
     }
   });
-  pi.on('session_shutdown', (event = { reason: 'quit' }) => detachTelemetryProcess(broker, owner, event.reason));
+  pi.on('session_shutdown', (event = { reason: 'quit' }) => {
+    detachTelemetryProcess(broker, owner, event.reason);
+    detachCanvasStatus('telemetry', owner);
+  });
   pi.registerTool({
     name: 'canvas_set_progress', label: 'Set Canvas progress',
     description: 'Enqueue your own progress note through the dedicated Pi-to-Scratch SHM telemetry channel. Maximum 500 characters; empty text clears it. Returns queued, not applied or durably saved. Scratch validates and updates Canvas; use canvas_read for observed state. Process-scoped across reload/new/resume/fork. No HTTP fallback, automatic resend or direct Canvas-state writes.',

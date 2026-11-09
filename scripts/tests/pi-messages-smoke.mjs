@@ -1,4 +1,4 @@
-import { spawn } from 'node:child_process';
+import { spawn, execFileSync } from 'node:child_process';
 import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -165,8 +165,33 @@ try {
     assert.equal(receipt.status, 'delivered', 'Process receipt history was lost on session replacement');
     await exchange(a, b, `after ${reason}`);
   }
+  // Only this isolated publisher: make its heartbeat stale and keep the parent
+  // heartbeat timer suspended while child Pi processes drain their real handles.
+  const status = (peer, predicate, after) => waitFor(peer, event => event.type === 'extension_ui_request' &&
+    event.method === 'setStatus' && event.statusKey === 'canvas-transport' && predicate(event.statusText), after);
+  for (let cycle = 0; cycle < 3; cycle++) {
+    const starts = peers.map(peer => peer.events.length);
+    execFileSync('python3', [fileURLToPath(new URL('./shm-corrupt.py', import.meta.url)), 'field', memory.name, '6', '0']);
+    peers.forEach(peer => command(peer, `pause-${cycle}`, '/transport-drain'));
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500);
+    await Promise.all(peers.map((peer, i) => status(peer, value => value === 'Canvas paused: telemetry, messaging', starts[i])));
+    const resumeStarts = peers.map(peer => peer.events.length);
+    memory.publish();
+    peers.forEach(peer => command(peer, `recover-${cycle}`, '/transport-drain'));
+    await Promise.all(peers.map((peer, i) => notify(peer, 'SHM_TRANSPORT_DRAINED', resumeStarts[i])));
+    for (const peer of peers) {
+      const latest = peer.events.filter(event => event.method === 'setStatus' && event.statusKey === 'canvas-transport').at(-1);
+      assert.equal(latest.statusText, undefined, 'Both healthy transports must clear the shared footer');
+    }
+  }
+  // A missing publisher is still fenced, with persistent footer error codes.
+  const fatalStarts = peers.map(peer => peer.events.length);
+  memory.close();
+  peers.forEach(peer => command(peer, 'fatal', '/transport-drain'));
+  await Promise.all(peers.map((peer, i) => status(peer, value => /Canvas error:.*telemetry SHM_MISSING.*messaging SHM_MISSING/.test(value ?? ''), fatalStarts[i])));
   for (const peer of peers) {
     assert.equal(peer.failure, null);
+    assert.equal(peer.events.some(event => event.method === 'notify' && /Canvas (telemetry|messaging) /.test(event.message ?? '')), false, 'Transport state must never print into the conversation');
     assert.equal(peer.events.some(event => event.type === 'agent_start'), false);
     assert.equal(peer.events.some(event => /Canvas telemetry (unavailable|report not queued)/.test(event.message ?? '')), false);
     const reports = telemetryReports.filter(frame => frame.id === peer.id);
@@ -177,7 +202,7 @@ try {
   try { for (const peer of peers) assert.equal((await peer.exit)[0], 0); }
   finally { clearTimeout(timeout); }
   assert.deepEqual(errors, []);
-  console.log('Two real Pi processes exchanged SHM messages/receipts across reload, new, resume and fork, including messages queued during handoff and retained receipt history. Actual current-context Pi API handoffs; no HTTP or LLM run. Dedicated telemetry also reported real current session identity/activity/progress with monotonic process sequences and retained receipts across all four transitions. Precise SHM metadata (>16 KiB) and freshly sampled layout/busy also passed through production query tools across all four transitions. Only disposable fixture sessions, removed after test.');
+  console.log('Two real Pi processes exchanged SHM messages/receipts across reload, new, resume and fork, including messages queued during handoff and retained receipt history. Actual current-context Pi API handoffs; no HTTP or LLM run. Dedicated telemetry also reported real current session identity/activity/progress with monotonic process sequences and retained receipts across all four transitions. Precise SHM metadata (>16 KiB) and freshly sampled layout/busy also passed through production query tools across all four transitions. Three actual heartbeat stale/recovery cycles used one shared RPC footer entry, emitted no transport notifications, and a missing publisher retained fatal footer errors. Only disposable fixture sessions, removed after test.');
 } finally {
   for (const peer of peers) if (peer.child.exitCode === null && peer.child.signalCode === null) peer.child.kill('SIGKILL');
   await Promise.allSettled(peers.map(peer => peer.exit));

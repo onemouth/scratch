@@ -1,5 +1,5 @@
 import { inboxMessageContent } from '../shared/canvas-inbox.js';
-import { transientMemoryError } from '../shared/canvas-memory.js';
+import { bindCanvasStatus, detachCanvasStatus, setCanvasStatus } from './pi-canvas-status.js';
 import { createCanvasMessageClient } from './canvas-message-client.js';
 import { MESSAGE_VERSION, messageError } from '../shared/canvas-messages.js';
 
@@ -9,6 +9,7 @@ import { MESSAGE_VERSION, messageError } from '../shared/canvas-messages.js';
 const KEY = Symbol.for('agent-canvas.messaging.process.v1');
 const notify = (ctx, text, level) => { try { if (ctx?.hasUI) ctx.ui.notify(text, level); } catch { /* UI never owns channel lifetime. */ } };
 export function bindMessageProcess({ config, name, epoch, pi, ctx, owner }) {
+  bindCanvasStatus('messaging', owner, ctx);
   if (config.version !== MESSAGE_VERSION || config.epoch !== epoch) throw messageError('SHM_VERSION', 'Incompatible messaging generation');
   const fingerprint = JSON.stringify({ config, name, epoch });
   let broker = process[KEY];
@@ -16,7 +17,7 @@ export function bindMessageProcess({ config, name, epoch, pi, ctx, owner }) {
   if (!broker) {
     broker = { fingerprint, binding: null, client: null, error: null, closed: false, close() {
       if (broker.closed) return;
-      broker.closed = true; broker.binding = null; broker.client?.close();
+      broker.closed = true; detachCanvasStatus('messaging', broker.binding?.owner); broker.binding = null; broker.client?.close();
       process.removeListener('exit', broker.close);
       if (process[KEY] === broker) delete process[KEY];
     } };
@@ -32,8 +33,7 @@ export function bindMessageProcess({ config, name, epoch, pi, ctx, owner }) {
       },
       onResume: () => {
         broker.error = null;
-        const ctx = broker.binding?.ctx;
-        notify(ctx, 'Canvas messaging recovered on the same server epoch; no messages resent.', 'info');
+        setCanvasStatus('messaging', broker.binding?.owner);
       },
       onReceipt: status => {
         const ctx = broker.binding?.ctx;
@@ -41,8 +41,7 @@ export function bindMessageProcess({ config, name, epoch, pi, ctx, owner }) {
       },
       onError: error => {
         broker.error = error;
-        const ctx = broker.binding?.ctx;
-        notify(ctx, `Canvas messaging ${transientMemoryError(error) ? 'paused until the original publisher recovers' : 'fenced'}: ${error.code ?? 'MESSAGE_ERROR'}. No retry or HTTP fallback.`, 'warning');
+        setCanvasStatus('messaging', broker.binding?.owner, error);
       },
     });
     process[KEY] = broker;
@@ -50,12 +49,13 @@ export function bindMessageProcess({ config, name, epoch, pi, ctx, owner }) {
   }
   broker.binding = { pi, ctx, owner };
   broker.client.drain(); // Recheck work queued during the context handoff.
-  if (broker.error) notify(ctx, `Canvas messaging unavailable: ${broker.error.code ?? 'MESSAGE_ERROR'}.`, 'warning');
+  setCanvasStatus('messaging', owner, broker.error);
   return broker;
 }
 
 export function detachMessageProcess(broker, owner, reason) {
   if (!broker || broker.binding?.owner !== owner) return; // Ignore stale runtime cleanup.
+  detachCanvasStatus('messaging', owner);
   broker.binding = null;
   broker.client.resetInboxContext?.(); // Older process-owned brokers remain valid until explicit relaunch.
   if (reason === 'quit') broker.close();

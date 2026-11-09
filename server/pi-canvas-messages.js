@@ -1,10 +1,11 @@
 import { bindMessageProcess, detachMessageProcess } from './pi-message-process.js';
 import { messageError } from '../shared/canvas-messages.js';
+import { bindCanvasStatus, detachCanvasStatus, setCanvasStatus } from './pi-canvas-status.js';
 
 export default function canvasMessagesExtension(pi) {
   const raw = process.env.AGENT_CANVAS_SHM_MESSAGES;
   if (!raw) return;
-  const config = JSON.parse(raw), name = process.env.AGENT_CANVAS_SHM_NAME, epoch = process.env.AGENT_CANVAS_SHM_EPOCH;
+  const name = process.env.AGENT_CANVAS_SHM_NAME, epoch = process.env.AGENT_CANVAS_SHM_EPOCH;
   let broker;
   const owner = Symbol('Pi messaging context');
   const result = value => ({ content: [{ type: 'text', text: JSON.stringify(value) }], details: value });
@@ -14,9 +15,17 @@ export default function canvasMessagesExtension(pi) {
     return broker.client;
   };
   pi.on('session_start', (_event, ctx) => {
-    broker = bindMessageProcess({ config, name, epoch, pi, ctx, owner });
+    bindCanvasStatus('messaging', owner, ctx);
+    try {
+      broker = bindMessageProcess({ config: JSON.parse(raw), name, epoch, pi, ctx, owner });
+    } catch (error) {
+      setCanvasStatus('messaging', owner, { code: error.code ?? 'MESSAGE_CONFIG', fatal: true });
+    }
   });
-  pi.on('session_shutdown', (event = { reason: 'quit' }) => detachMessageProcess(broker, owner, event.reason));
+  pi.on('session_shutdown', (event = { reason: 'quit' }) => {
+    detachMessageProcess(broker, owner, event.reason);
+    detachCanvasStatus('messaging', owner);
+  });
   // Observe only this binding's model context. Neither handoff nor working/idle
   // proves a specific message entered a request. Errors/abort do not consume it.
   pi.on('context_with_system', event => {
