@@ -20,6 +20,7 @@ import { createCanvasMessaging } from './canvas-messages.js';
 import { createCanvasQueries } from './canvas-queries.js';
 import { queryError, queryPage } from '../shared/canvas-queries.js';
 import { createCanvasTelemetry } from './canvas-telemetry.js';
+import { createVault } from './vault.js';
 
 const root = resolve(fileURLToPath(new URL('..', import.meta.url)));
 const dist = join(root, 'dist');
@@ -46,7 +47,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   function geometry({ id, x, y, width, height }) { return { id, x, y, width, height }; }
   let views;
   let cards;
-  let memory, messaging, telemetry, queries;
+  let memory, messaging, telemetry, queries, vault;
   const clients = new Set();
   const terminals = new Map();
   let pending = false;
@@ -66,7 +67,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     } : agent),
     edges: [...edges.values()], notes: [...notes.values()], cardPlacements: [...cardPlacements.values()],
     cardBox: views?.snapshot({ live }) ?? { placements: [] },
-    ...(live ? { cards: cards?.list({ includeInteractiveSource: false }) ?? [] } : {}),
+    ...(live ? { cards: cards?.list({ includeInteractiveSource: false }) ?? [], vault: vault?.status() } : {}),
     persistence: { enabled: !!stateFile, error: saveError },
   });
   const flush = () => {
@@ -102,7 +103,8 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     getMessaging: () => messaging,
     getTelemetry: () => telemetry,
     getQueries: () => queries,
-    onChange: () => memory?.observeAgents(),
+    getVault: () => vault,
+    onChange: () => { memory?.observeAgents(); vault?.observeProcesses(); },
   });
   const { startAgent, stopProcesses } = runtime;
   const operate = createCanvasOperations({
@@ -116,13 +118,14 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
   const handler = createHttpHandler({
     port, allowedOrigin, snapshot, clients, sessionsRoot, apiGuide,
     getBackendUrl: () => `http://127.0.0.1:${server.address().port}`,
-    getCards: () => cards, mediaDirectory, operate, broadcast, dist,
+    getCards: () => cards, getVault: () => vault, mediaDirectory, operate, broadcast, dist,
     isUnavailable: () => closing || resetting,
   });
   const server = http.createServer((req, res) => { handler(req, res).catch((error) => reply(res, 500, { error: error.message })); });
   const wss = attachTerminalTransport({ server, agents, processes: runtime.processes, terminals, allowedOrigin });
   return {
     server, snapshot, runtime,
+    get vaultControlCode() { return vault?.controlCode; },
     get sharedMemory() { return memory ? { name: memory.name, epoch: memory.epoch, error: memory.error } : null; },
     listen: async () => {
       unlock = lockCanvas(stateFile);
@@ -146,6 +149,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       }
       try {
         views = new CardViews(saved?.cardBox, cards.list());
+        vault = createVault({ cards, getAgent: id => agents.has(id) ? runtime.get(id) : null, onChange: publish });
         memory = createCanvasMemory({
           ...sharedMemory,
           getAgents: () => runtime.list(),
@@ -164,7 +168,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
           return queryPage('objects', canvasLayout.snapshot().objects, params);
         } });
         await new Promise((resolveListen, reject) => { server.once('error', reject); server.listen(port, '127.0.0.1', resolveListen); });
-      } catch (error) { queries?.close(); telemetry?.close(); messaging?.close(); memory?.close(); cards.close(); unlockCards(); unlock(); throw error; }
+      } catch (error) { vault?.close(); queries?.close(); telemetry?.close(); messaging?.close(); memory?.close(); cards.close(); unlockCards(); unlock(); throw error; }
       started = true;
       for (const agent of agents.values()) {
         if (agent.status !== 'running') { agent.status = 'stopped'; continue; }
@@ -177,7 +181,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
       if (closePromise) return closePromise;
       flush(); // Save running intent BEFORE shutdown kills change process status.
       closing = true;
-      queries?.close(); telemetry?.close(); messaging?.close(); memory?.close();
+      vault?.close(); queries?.close(); telemetry?.close(); messaging?.close(); memory?.close();
       closePromise = (async () => {
         for (const client of clients) client.end();
         for (const group of terminals.values()) for (const ws of group) ws.terminate();
@@ -200,7 +204,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
   const { stateFile, cardsFile, migrated } = paths;
   if (migrated) console.log('Migrated data to ~/Documents/agent-canvas; originals retained in ~/.agent-canvas.');
   const app = createApp({ stateFile, cardsFile });
-  app.listen().then(() => console.log(`Agent Canvas API: http://127.0.0.1:${process.env.PORT || 3001}\nCanvas save: ${stateFile}\nCard database: ${cardsFile}`)).catch(error => { console.error(error.message); process.exit(1); });
+  app.listen().then(() => console.log(`Agent Canvas API: http://127.0.0.1:${process.env.PORT || 3001}\nCanvas save: ${stateFile}\nCard database: ${cardsFile}\nVault control code (human UI only; do not share with Agents): ${app.vaultControlCode}`)).catch(error => { console.error(error.message); process.exit(1); });
   process.on('SIGINT', () => app.close().then(() => process.exit(0)));
   process.on('SIGTERM', () => app.close().then(() => process.exit(0)));
 }

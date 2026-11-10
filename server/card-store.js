@@ -1,4 +1,5 @@
 import { DatabaseSync, backup } from 'node:sqlite';
+import { randomUUID } from 'node:crypto';
 import { mkdirSync, chmodSync } from 'node:fs';
 import { dirname } from 'node:path';
 import { validateCardLinks } from '../shared/card-links.js';
@@ -7,6 +8,7 @@ import { publicMediaFile, validateMediaFile } from './card-media-store.js';
 import { inspectCardContent, validateCardContent } from '../shared/card-content.js';
 import { INTERACTIVE_LIMITS, validateInteractiveSource, validateInteractiveTitle } from './interactive-card.js';
 import { validateInteractiveAssetFile } from './interactive-asset-store.js';
+import { validateVaultKey, validateVaultValue, validateVaultConfig } from './vault-crypto.js';
 
 export function validateTags(tags) {
   if (!Array.isArray(tags) || tags.length > 30 || tags.some(tag => typeof tag !== 'string' || !tag.trim() || [...tag.trim()].length > 60 || /[,\n\r]/.test(tag))) throw new Error('tags must be an array of up to 30 non-empty strings, each at most 60 characters, without commas/newlines');
@@ -23,7 +25,7 @@ export class CardStore {
     try {
       if (file !== ':memory:') chmodSync(file, 0o600);
       const version = this.db.prepare('PRAGMA user_version').get().user_version;
-      if (version > 5) throw new Error('Unsupported card database version');
+      if (version > 8) throw new Error('Unsupported card database version');
       this.db.exec('PRAGMA foreign_keys=ON; PRAGMA busy_timeout=5000; PRAGMA journal_mode=WAL; PRAGMA synchronous=FULL;');
       if (version === 0) this.db.exec(`
         BEGIN IMMEDIATE;
@@ -80,7 +82,72 @@ export class CardStore {
           ); PRAGMA user_version=5; COMMIT;`);
         } catch (error) { this.db.exec('ROLLBACK'); throw error; }
       }
+      if (version < 6) this.db.exec(`
+        BEGIN IMMEDIATE;
+        CREATE TABLE IF NOT EXISTS vault_config (id INTEGER PRIMARY KEY CHECK(id=1), config TEXT NOT NULL);
+        CREATE TABLE IF NOT EXISTS card_vault_values (card_id TEXT PRIMARY KEY REFERENCES cards(id) ON DELETE CASCADE, envelope TEXT NOT NULL);
+        PRAGMA user_version=6;
+        COMMIT;
+      `);
+      if (version < 7) this.migrateVaultV6ToV8();
+      else if (version < 8) this.migrateVaultV7ToV8();
+      const vaultConfig = this.vaultConfig(); // Fail closed, never recreate lost crypto metadata.
+      const vaultEntries = this.db.prepare('SELECT id FROM vault_entries LIMIT 1').get();
+      const legacyVaultCard = this.db.prepare("SELECT id FROM cards WHERE type='vault' LIMIT 1").get();
+      if (!vaultConfig && vaultEntries) throw new Error('Vault configuration is missing');
+      if (legacyVaultCard) throw new Error('Legacy Vault card remains after migration');
     } catch (error) { this.db.close(); throw error; }
+  }
+  removeLegacyVaultLinks(ids) {
+    const removed = new Set(ids), timestamp = this.now().toISOString();
+    for (const row of this.db.prepare("SELECT id,links FROM cards WHERE type!='vault'").all()) {
+      const links = validateCardLinks(JSON.parse(row.links)), next = links.filter(id => !removed.has(id));
+      if (next.length !== links.length) this.db.prepare('UPDATE cards SET links=?,updated_at=? WHERE id=?').run(JSON.stringify(next), timestamp, row.id);
+    }
+  }
+  migrateVaultV6ToV8() {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.exec(`CREATE TABLE IF NOT EXISTS vault_entries (
+        id TEXT PRIMARY KEY, key TEXT NOT NULL UNIQUE, envelope TEXT NOT NULL,
+        created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+      )`);
+      const config = this.vaultConfig(), oldCards = this.db.prepare("SELECT * FROM cards WHERE type='vault' ORDER BY id").all();
+      const oldValues = this.db.prepare('SELECT card_id,envelope FROM card_vault_values').all();
+      if (!config && (oldCards.length || oldValues.length)) throw new Error('Vault configuration is missing');
+      const cardIds = new Set(oldCards.map(card => card.id));
+      if (oldValues.some(row => !cardIds.has(row.card_id))) throw new Error('Vault encrypted value has no card');
+      if (oldCards.length) {
+        const valueById = new Map(oldValues.map(row => [row.card_id, row.envelope]));
+        if (valueById.size !== oldCards.length) throw new Error('Vault encrypted value is missing');
+        const keys = new Set();
+        for (const card of oldCards) {
+          const key = validateVaultKey(card.title);
+          if (key !== card.title) throw new Error('Vault key metadata is not canonical; cannot preserve authenticated context');
+          if (keys.has(key)) throw Object.assign(new Error(`Vault key already exists: ${key}`), { code: 'VAULT_KEY_EXISTS', status: 409 });
+          keys.add(key); JSON.parse(valueById.get(card.id));
+          this.db.prepare('INSERT INTO vault_entries (id,key,envelope,created_at,updated_at) VALUES (?,?,?,?,?)')
+            .run(card.id, key, valueById.get(card.id), card.created_at, card.updated_at);
+        }
+        this.removeLegacyVaultLinks(oldCards.map(card => card.id));
+        this.db.prepare("DELETE FROM cards WHERE type='vault'").run();
+      }
+      this.db.exec(`DROP TABLE IF EXISTS card_vault_values; DROP INDEX IF EXISTS cards_single_vault;
+        PRAGMA user_version=8; COMMIT;`);
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  migrateVaultV7ToV8() {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const config = this.vaultConfig(), roots = this.db.prepare("SELECT id FROM cards WHERE type='vault'").all();
+      const entries = this.db.prepare('SELECT id,key,envelope FROM vault_entries').all();
+      if (!config && (roots.length || entries.length)) throw new Error('Vault configuration is missing');
+      if (config && roots.length !== 1) throw new Error('Vault card is missing');
+      for (const entry of entries) { if (validateVaultKey(entry.key) !== entry.key) throw new Error('Vault key metadata is not canonical'); JSON.parse(entry.envelope); }
+      this.removeLegacyVaultLinks(roots.map(root => root.id));
+      this.db.prepare("DELETE FROM cards WHERE type='vault'").run();
+      this.db.exec('DROP INDEX IF EXISTS cards_single_vault; PRAGMA user_version=8; COMMIT;');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   decode(row, { includeInteractiveSource = true } = {}) {
     if (!row) throw Object.assign(new Error('Card not found'), { status: 404 });
@@ -183,6 +250,78 @@ export class CardStore {
         this.db.prepare('UPDATE cards SET links=?, updated_at=? WHERE id=?').run(JSON.stringify(updated), timestamp, targetId);
       }
     }
+  }
+  vaultConfig() {
+    const row = this.db.prepare('SELECT config FROM vault_config WHERE id=1').get();
+    return row ? validateVaultConfig(JSON.parse(row.config)) : null;
+  }
+  initializeVault(config) {
+    validateVaultConfig(config);
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      if (this.vaultConfig()) throw Object.assign(new Error('Vault is already configured'), { code: 'VAULT_CONFIGURED', status: 409 });
+      this.db.prepare('INSERT INTO vault_config (id,config) VALUES (1,?)').run(JSON.stringify(config));
+      this.db.exec('COMMIT');
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  vaultEntries() {
+    return this.db.prepare('SELECT id,key,created_at,updated_at FROM vault_entries ORDER BY created_at,id').all().map(row => ({ id: row.id, key: validateVaultKey(row.key), createdAt: row.created_at, updatedAt: row.updated_at }));
+  }
+  vaultEntry(id) {
+    const row = this.db.prepare('SELECT id,key,created_at,updated_at FROM vault_entries WHERE id=?').get(id);
+    if (!row) throw Object.assign(new Error('Vault entry not found'), { code: 'VAULT_ENTRY', status: 404 });
+    return { id: row.id, key: validateVaultKey(row.key), createdAt: row.created_at, updatedAt: row.updated_at };
+  }
+  vaultEntryByKey(key) {
+    const normalized = validateVaultKey(key);
+    const row = this.db.prepare('SELECT id,key,created_at,updated_at FROM vault_entries WHERE key=?').get(normalized);
+    if (!row) throw Object.assign(new Error('Vault entry not found'), { code: 'VAULT_ENTRY', status: 404 });
+    return { id: row.id, key: validateVaultKey(row.key), createdAt: row.created_at, updatedAt: row.updated_at };
+  }
+  vaultEnvelope(id) {
+    this.vaultEntry(id);
+    const row = this.db.prepare('SELECT envelope FROM vault_entries WHERE id=?').get(id);
+    if (!row) throw Object.assign(new Error('Vault encrypted value is missing'), { code: 'VAULT_AUTH', status: 400 });
+    return JSON.parse(row.envelope);
+  }
+  createVaultEntry(body, { encryptVault } = {}) {
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['key', 'value'].includes(key)) || typeof encryptVault !== 'function') throw new Error('Invalid Vault entry creation');
+    if (!this.vaultConfig()) throw Object.assign(new Error('Vault is not configured'), { code: 'VAULT_NOT_CONFIGURED', status: 409 });
+    const key = validateVaultKey(body.key), value = validateVaultValue(body.value), id = randomUUID(), timestamp = this.now().toISOString();
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const envelope = encryptVault(id, key, value);
+      this.db.prepare('INSERT INTO vault_entries (id,key,envelope,created_at,updated_at) VALUES (?,?,?,?,?)').run(id, key, JSON.stringify(envelope), timestamp, timestamp);
+      this.db.exec('COMMIT'); return this.vaultEntry(id);
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      if (String(error.message).includes('UNIQUE constraint')) throw Object.assign(new Error(`Vault key already exists: ${key}`), { code: 'VAULT_KEY_EXISTS', status: 409 });
+      throw error;
+    }
+  }
+  updateVaultEntry(id, body, { encryptVault, decryptVault } = {}) {
+    if (!body || typeof body !== 'object' || Array.isArray(body) || Object.keys(body).some(key => !['key', 'value'].includes(key)) || !Object.keys(body).length || typeof encryptVault !== 'function' || typeof decryptVault !== 'function') throw new Error('Invalid Vault entry update');
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const entry = this.vaultEntry(id), key = body.key === undefined ? entry.key : validateVaultKey(body.key);
+      if (key !== entry.key && this.db.prepare('SELECT id FROM vault_entries WHERE key=? AND id!=?').get(key, id)) throw Object.assign(new Error(`Vault key already exists: ${key}`), { code: 'VAULT_KEY_EXISTS', status: 409 });
+      const value = body.value === undefined ? decryptVault(id, entry.key, this.vaultEnvelope(id)) : validateVaultValue(body.value);
+      const envelope = encryptVault(id, key, value), timestamp = this.now().toISOString();
+      this.db.prepare('UPDATE vault_entries SET key=?,envelope=?,updated_at=? WHERE id=?').run(key, JSON.stringify(envelope), timestamp, id);
+      this.db.exec('COMMIT'); return this.vaultEntry(id);
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
+  }
+  deleteVaultEntry(id) {
+    this.vaultEntry(id);
+    this.db.prepare('DELETE FROM vault_entries WHERE id=?').run(id);
+    return { ok: true };
+  }
+  resetVault() {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      this.db.exec('DELETE FROM vault_entries; DELETE FROM vault_config;');
+      this.db.exec('COMMIT'); return [];
+    } catch (error) { this.db.exec('ROLLBACK'); throw error; }
   }
   create(body = {}) {
     if (!body || typeof body !== 'object' || Array.isArray(body)) throw new Error('Card creation requires an object');
