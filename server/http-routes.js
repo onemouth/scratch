@@ -3,6 +3,7 @@ import { resolve, extname } from 'node:path';
 import { storeMediaUpload, serveMedia } from './card-media-store.js';
 import { serveInteractiveAsset } from './interactive-asset-store.js';
 import { savedWorkdirs } from './session-workdirs.js';
+import { createVaultHttp } from './vault-http.js';
 
 const mime = { '.html': 'text/html', '.js': 'text/javascript', '.css': 'text/css', '.svg': 'image/svg+xml', '.ico': 'image/x-icon' };
 export const reply = (res, status, value) => {
@@ -12,11 +13,13 @@ export const reply = (res, status, value) => {
 };
 
 // Origin/body/response/media/SSE handling only; domain mutations are delegated.
-export function createHttpHandler({ port, allowedOrigin, snapshot, clients, sessionsRoot, getBackendUrl, apiGuide, getCards, mediaDirectory, operate, isUnavailable, broadcast, dist }) {
+export function createHttpHandler({ port, allowedOrigin, snapshot, clients, sessionsRoot, getBackendUrl, apiGuide, getCards, getVault = () => null, mediaDirectory, operate, isUnavailable, broadcast, dist }) {
+  const vaultHandler = createVaultHttp({ getVault, isUnavailable });
   const handler = async (req, res) => {
     const cards = getCards();
     const url = new URL(req.url, `http://127.0.0.1:${port}`);
     if (!allowedOrigin(req.headers.origin)) return reply(res, 403, { error: 'Cross-origin requests are not allowed' });
+    if (url.pathname === '/api/vault' || url.pathname.startsWith('/api/vault/')) return vaultHandler(req, res, url);
     if (url.pathname === '/api/events' && req.method === 'GET') {
       res.writeHead(200, { 'Content-Type': 'text/event-stream', 'Cache-Control': 'no-cache', Connection: 'keep-alive' });
       res.write(`data: ${JSON.stringify(snapshot())}\n\n`);

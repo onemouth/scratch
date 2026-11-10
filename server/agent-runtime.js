@@ -9,7 +9,7 @@ const failure = (message, status = 400) => Object.assign(new Error(message), { s
 
 // Owns process/run/activity state. Domain operations own canvas records; HTTP
 // and terminal transport never implement process/session semantics.
-export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate, getMemory = () => null, getMessaging = () => null, getTelemetry = () => null, getQueries = () => null, onChange = () => {} }) {
+export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate, getMemory = () => null, getMessaging = () => null, getTelemetry = () => null, getQueries = () => null, getVault = () => null, onChange = () => {} }) {
   const processes = new Map(), runs = new Map(), activity = new Map();
   const notify = onChange;
   const requireAgent = id => {
@@ -58,6 +58,8 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
       runs.get(id).telemetry = telemetry;
       const queries = getQueries().createChannel(id, runs.get(id).generation);
       runs.get(id).queries = queries;
+      const vault = getVault()?.openProcess(id, runs.get(id).generation);
+      runs.get(id).vault = vault;
       const common = ['--tui-mode', 'regular', '--extension', join(root, 'server', 'pi-session-tracker.js'),
         '--extension', join(root, 'server', 'pi-canvas-memory.js'),
         '--extension', join(root, 'server', 'pi-canvas-queries.js'),
@@ -66,16 +68,18 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
         ? [...(exactSession ? ['--session', agent.sessionFile] : ['--resume']), ...common]
         : mode === 'resume' ? ['--resume', ...common]
           : ['--name', agent.name, ...common, ...(agent.task ? ['--', agent.task] : [])];
-      const { AGENT_CANVAS_SHARED_MEMORY: _oldSwitch, AGENT_CANVAS_TELEMETRY_TRANSPORT: _oldTransport, AGENT_CANVAS_RUN: _oldToken, ...environment } = process.env;
+      const { AGENT_CANVAS_SHARED_MEMORY: _oldSwitch, AGENT_CANVAS_TELEMETRY_TRANSPORT: _oldTransport, AGENT_CANVAS_RUN: _oldToken, AGENT_CANVAS_VAULT_TOKEN: _oldVaultToken, AGENT_CANVAS_VAULT_CONTROL: _oldVaultControl, ...environment } = process.env;
       child = spawnAgent('pi', args, {
         cwd: workdir, cols: 50, rows: 16, name: 'xterm-256color',
         env: { ...environment, TERM: 'xterm-256color', PI_IMAGE_PROTOCOL: 'none', AGENT_CANVAS_URL: base, AGENT_CANVAS_ID: id,
           AGENT_CANVAS_SHM_NAME: memory.name, AGENT_CANVAS_SHM_EPOCH: memory.epoch, AGENT_CANVAS_SHM_NOTIFY: notifier.name,
           AGENT_CANVAS_SHM_MESSAGES: JSON.stringify(messages.config),
           AGENT_CANVAS_SHM_TELEMETRY: JSON.stringify(telemetry.config),
-          AGENT_CANVAS_SHM_QUERIES: JSON.stringify(queries.config) },
+          AGENT_CANVAS_SHM_QUERIES: JSON.stringify(queries.config),
+          ...(vault ? { AGENT_CANVAS_VAULT_TOKEN: vault.token } : {}) },
       });
     } catch (error) {
+      runs.get(id)?.vault?.close();
       runs.get(id)?.queries?.close();
       runs.get(id)?.telemetry?.close();
       runs.get(id)?.messages?.close();
@@ -98,6 +102,7 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
       const wasStopping = agent.status === 'stopping';
       agent.status = 'stopped';
       notify(); // Observe the old run ending even if restore immediately replaces it.
+      run?.vault?.close();
       run?.queries?.close();
       run?.telemetry?.close();
       run?.messages?.close();
@@ -153,7 +158,7 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
     list: () => [...agents.values()].map(agent => describe(agent)),
     get: id => describe(requireAgent(id)),
     read: id => ({ id, output: requireAgent(id).output, maxCharacters: MAX_OUTPUT }),
-    forget: id => { runs.delete(id); activity.delete(id); },
+    forget: id => { runs.get(id)?.vault?.close(); runs.delete(id); activity.delete(id); },
     stop: id => {
       const agent = requireAgent(id);
       if (processes.has(id)) { agent.status = 'stopping'; processes.get(id).kill(); }

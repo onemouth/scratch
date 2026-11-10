@@ -12,10 +12,11 @@
     "build": "vite build",
     "build:shm": "node scripts/build-shm.js",
     "test:shm": "npm run build:shm && node --test shared/canvas-memory.test.js server/canvas-memory.test.js server/canvas-notify.test.js server/canvas-messages.test.js server/canvas-telemetry.test.js server/agent-inbox.test.js server/pi-canvas-status.test.js",
-    "test:shm:pi": "npm run build:shm && node scripts/tests/pi-shm-smoke.mjs && node scripts/tests/pi-messages-smoke.mjs && node scripts/tests/pi-inbox-smoke.mjs",
+    "test:shm:pi": "npm run build:shm && node scripts/tests/pi-shm-smoke.mjs && node scripts/tests/pi-messages-smoke.mjs && node scripts/tests/pi-inbox-smoke.mjs && node scripts/tests/pi-vault-smoke.mjs",
     "start": "node server/index.js",
     "tailscale:setup": "node scripts/tailscale-setup.js",
     "test": "node --test",
+    "test:vault": "npm run build:shm && node --test server/vault*.test.js && node scripts/tests/pi-vault-smoke.mjs",
     "test:views:browser": "node scripts/tests/card-views-browser.mjs"
   },
   "dependencies": {
