@@ -11,20 +11,24 @@ B delivery ack → Scratch → A receipt queue → A UI / canvas_message_status
 ## Tools
 
 ```js
-canvas_send_message({ agentId: "<TARGET_ID>", text: "Please review the parser." })
+// Recommended for peer work: explicitly request processing, including when idle.
+canvas_send_message({ agentId: "<TARGET_ID>", text: "Please review the parser.",
+  delivery: "followUp", wake: true })
 // → {messageId, status:"queued", agentId, generation, expiresAt}
 
 canvas_message_status({ messageId: "<RETURNED_MESSAGE_ID>" })
 // → last-known status; returns immediately, never waits
 
-// Explicitly ask for a follow-up and permit an idle turn:
-canvas_send_message({ agentId: "<TARGET_ID>", text: "Review complete; see the results.",
-  delivery: "followUp", wake: true })
+// Only for deliberately passive context; this does not start an idle model:
+canvas_send_message({ agentId: "<TARGET_ID>", text: "For context only; no action required.",
+  delivery: "nextTurn", wake: false })
 ```
 
 Use IDs/generations from canvas_read, not guessed names. Optional `generation` pins an explicitly selected target process; otherwise the tool takes the current generation from SHM before enqueueing. Scratch checks the generation and running state again at acceptance. A restart never redirects an old message to the new process. Self messaging is rejected. Sending does not create a delegation edge.
 
-Defaults: `delivery:"nextTurn"`, `wake:false`, `ttlMs:60000`. Only nextTurn/followUp are supported; no steer/user-message impersonation. `wake:true` requires followUp. nextTurn enters Pi's next-prompt queue without interrupting or waking it. For followUp, the extension forwards `triggerTurn:wake`; Pi decides whether to append/defer/queue based on its current run state. In particular, wake:false does not promise a new model turn while busy. Peer payloads are labeled as data, not user/system instructions. Do not automatically reply or create wake cycles.
+**Recommendation:** explicitly use `delivery:"followUp", wake:true` for peer messages that should be processed. This permits starting an idle model turn without interrupting a running tool. Reserve `nextTurn`/`wake:false` for intentionally passive context; there is no automatic inbox-draining loop. Processing can incur model costs and is still subject to Pi scheduling and rate limits.
+
+Program defaults are unchanged: `delivery:"nextTurn"`, `wake:false`, `ttlMs:60000`. Only nextTurn/followUp are supported; no steer/user-message impersonation. `wake:true` requires followUp. nextTurn enters Pi's next-prompt queue without interrupting or waking it. For followUp, the extension forwards `triggerTurn:wake`; Pi decides whether to append/defer/queue based on its current run state. In particular, wake:false does not promise a new model turn while busy. Peer payloads are labeled as data, not user/system instructions. Do not automatically reply or create wake cycles.
 
 `canvas_send_message` checks cancellation before publishing, then returns the committed message ID without waiting for Scratch. A wake error after publication is returned as `notificationWarning`, not a supposedly safe-to-retry failure. Native queue-full errors mean that attempted enqueue did not commit. Do not automatically resend uncertain messages.
 
@@ -58,7 +62,7 @@ Each process gets four independent POSIX shm_open/mmap(MAP_SHARED) SPSC queues, 
 
 Ack traffic cannot be blocked behind send traffic. Scratch reserves a terminal receipt credit for every accepted message; receipt backpressure pauses outbox consumption rather than overwriting data. Full destination mailboxes cause explicit rejection. At most 15 outstanding accepted routes per source, 16 outbox entries, and 16 inbox entries are possible. Empty/oversize/malformed frames are rejected; no shared-memory overwrite policy exists for messages. Latest statuses are not stored in the lossy lifecycle event journal. Recipients also have a bounded pending projection (64 unresolved rows each / 1024 total); MESSAGE_INBOX_FULL rejects before enqueue, with no silent eviction. Closed unresolved rows count until replacement or node removal. Inbox observation facts/readiness use the recipient ack queue with their own monotonic sequence, at most eight included and eight uncertain IDs per 1 KiB frame; no peer payloads are resent.
 
-Limits: text is nonblank, at most **8000 UTF-8 bytes**, without terminal control characters (newlines/tabs allowed); ttlMs is 1–600000. Each source can accept at most 30 messages/minute. followUp has additional **3/minute per sender and recipient**, and **16 per process lifetime** for both sending and receiving. These finite budgets also apply to wake:false followUps. Ordinary nextTurn messages remain available when a follow-up budget is exhausted. Limits reject with MESSAGE_RATE; there is no scheduled retry. Minute-based rates replenish with time, but the lifetime budgets do not reset within the process.
+Limits: text is nonblank, at most **8000 UTF-8 bytes**, without terminal control characters (newlines/tabs allowed); ttlMs is 1–600000. Each source can accept at most 30 messages/minute. followUp has additional **3/minute per sender and recipient**, including wake:false followUps. There is **no process-lifetime cap** on follow-up sending or receiving. Ordinary nextTurn messages remain subject to overall message/queue/inbox limits even when follow-up rate limits are reached. Limits reject with MESSAGE_RATE; there is no scheduled retry. Rolling one-minute rate windows replenish with time without restarting a process.
 
 The native addon claims one producer and one consumer per queue, including worker environments, copies Buffers instead of exposing mapped pointers, and publishes tail only after atomic payload writes finish. Consumers advance head only after handling the record. Incomplete writes without a published tail remain invisible. Fixed capacities, header validation and bounded drains avoid unbounded native allocations or callback queues. JS operations have no await inside queue publication, so parallel Pi tool calls remain serialized on the extension's event loop.
 
@@ -70,7 +74,7 @@ Required SHM startup also loads `server/pi-canvas-messages.js` and supplies priv
 
 Mailbox descriptors are provisioned at process launch, without a discovery API. Tools/environment are process-scoped; changes require an explicit user-managed relaunch. SHM messaging never falls back to HTTP or terminal paste.
 
-**Messages address a Pi process, not a session.** A process-scoped broker retains queues, pending messages, receipt history, duplicate detection and budgets across /reload, /new, /resume and /fork. Extension-runtime shutdown detaches the old Pi API/context without closing the channel. During that handoff gap the client continues collecting receipts but does not consume inbox messages. The new runtime binds its current Pi API/context and drains queued messages, subject to their original deadlines. No process relaunch is needed. Stale runtime cleanup cannot detach the new binding, and stale tool instances cannot send through it.
+**Messages address a Pi process, not a session.** A process-scoped broker retains queues, pending messages, receipt history, duplicate detection and rate windows across /reload, /new, /resume and /fork. Extension-runtime shutdown detaches the old Pi API/context without closing the channel. During that handoff gap the client continues collecting receipts but does not consume inbox messages. The new runtime binds its current Pi API/context and drains queued messages, subject to their original deadlines. No process relaunch is needed. Stale runtime cleanup cannot detach the new binding, and stale tool instances cannot send through it.
 
 Already handed-off messages belong to Pi's conversation/nextTurn queue; the broker does not copy or automatically resend those messages into a different session. Delivered remains an API-handoff receipt, not proof the model read it. Pi closes its native endpoints only on process exit/quit (not ordinary session replacement), explicit lifecycle cleanup or failed initialization. Temporary SHM_STALE/BUSY/NOT_READY/UNAVAILABLE conditions pause sends/handoffs until the same publisher/epoch validates again, without resending messages. Missing/closed/incompatible/corrupt generations fence operations and retain Pi's handles until process cleanup, never automatically reconnecting. Scratch closes its counterpart endpoints on process exit/server shutdown or unsafe routing failure. A process-local broker is only a lifecycle owner for real POSIX queues, never a process-local substitute for shared-memory transport.
 
