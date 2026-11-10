@@ -61,15 +61,15 @@ export function createCanvasMessaging({ epoch, getAgent, onChange = () => {}, on
         const target = channels.get(frame.agentId);
         if (!target || !current(target) || target.generation !== frame.generation) throw messageError('MESSAGE_TARGET', 'Target unavailable or process generation changed');
         target.incomingFollowUps = target.incomingFollowUps.filter(time => time > now() - 60000);
-        if (frame.delivery === 'followUp' && (source.followUpCount >= 16 || target.followUpCountReceived >= 16 || target.incomingFollowUps.length >= 3)) {
-          throw messageError('MESSAGE_RATE', 'Follow-up rate or process lifetime budget reached');
+        if (frame.delivery === 'followUp' && target.incomingFollowUps.length >= 3) {
+          throw messageError('MESSAGE_RATE', 'Recipient follow-up rate limit');
         }
         if (!inbox.capacity(target.id, target.generation)) throw messageError('MESSAGE_INBOX_FULL', 'Target pending inbox capacity reached');
         if (target.inbox.used >= QUEUE_SLOTS) throw messageError('SHM_QUEUE_FULL', 'Target mailbox full');
         source.rate.push(now());
         if (frame.delivery === 'followUp') {
-          source.wakes.push(now()); source.followUpCount++;
-          target.incomingFollowUps.push(now()); target.followUpCountReceived++;
+          source.wakes.push(now());
+          target.incomingFollowUps.push(now());
         }
         source.seen.set(id, now() + 660000);
         target.inbox.push({ ...frame, sourceId: source.id, sourceGeneration: source.generation, serverEpoch: epoch });
@@ -106,7 +106,7 @@ export function createCanvasMessaging({ epoch, getAgent, onChange = () => {}, on
     createChannel(id, generation) {
       if (closed || channels.has(id) || channels.size >= 256) throw messageError('MESSAGE_LIMIT', 'Messaging closed or process channel limit reached');
       const resources = [], config = { version: MESSAGE_VERSION, inboxVersion: INBOX_VERSION, epoch, id, generation };
-      const channel = { id, generation, pending: new Map(), seen: new Map(), rate: [], wakes: [], incomingFollowUps: [], followUpCount: 0, followUpCountReceived: 0, close() {
+      const channel = { id, generation, pending: new Map(), seen: new Map(), rate: [], wakes: [], incomingFollowUps: [], close() {
         if (channels.get(id) !== channel) return;
         channels.delete(id);
         try { drainAcks(channel); } catch { /* Closure remains uncertain if acks cannot be read. */ }

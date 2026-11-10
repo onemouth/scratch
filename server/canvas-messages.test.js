@@ -212,22 +212,59 @@ test('messaging transient errors recover but fatal epochs retain fenced process 
   }
 });
 
-test('follow-ups have sender/recipient rate limits and finite process budgets; ordinary messages never wake', () => {
+test('follow-ups retain sender/recipient rolling rate limits, including wake:false; defaults never wake', () => {
   const f = fixture();
   try {
     const a = f.client('a'); f.client('b'); const c = f.client('c');
-    for (let i = 0; i < 3; i++) { a.send({ agentId: 'b', text: 'Explicit', delivery: 'followUp', wake: true }); f.pump(); }
-    const rate = c.send({ agentId: 'b', text: 'Aggregate recipient limit', delivery: 'followUp', wake: true }); f.pump();
-    assert.equal(c.status(rate.messageId).code, 'MESSAGE_RATE');
-    for (let i = 3; i < 16; i++) {
-      f.advance(61000); a.send({ agentId: 'b', text: 'Explicit', delivery: 'followUp', wake: true }); f.pump();
+    for (let i = 0; i < 3; i++) {
+      const sent = a.send({ agentId: 'b', text: 'Explicit', delivery: 'followUp', wake: i !== 1 }); f.pump();
+      assert.equal(a.status(sent.messageId).status, 'delivered');
     }
-    f.advance(61000);
-    const budget = a.send({ agentId: 'b', text: 'Budget exhausted', delivery: 'followUp', wake: true }); f.pump();
-    assert.equal(a.status(budget.messageId).code, 'MESSAGE_RATE');
-    const normal = a.send({ agentId: 'b', text: 'Still can send non-waking context' }); f.pump();
+    const senderRate = a.send({ agentId: 'c', text: 'Sender limit across recipients', delivery: 'followUp', wake: false }); f.pump();
+    assert.equal(a.status(senderRate.messageId).code, 'MESSAGE_RATE');
+    const recipientRate = c.send({ agentId: 'b', text: 'Recipient limit across senders', delivery: 'followUp', wake: false }); f.pump();
+    assert.equal(c.status(recipientRate.messageId).code, 'MESSAGE_RATE');
+    const normal = a.send({ agentId: 'b', text: 'Intentionally passive context' }); f.pump();
     assert.equal(a.status(normal.messageId).status, 'delivered');
+    assert.equal(f.received.get('b').at(-1).delivery, 'nextTurn');
     assert.equal(f.received.get('b').at(-1).wake, false);
+    f.advance(61000);
+    for (const sender of [a, c]) {
+      const sent = sender.send({ agentId: 'b', text: 'Rate window recovered', delivery: 'followUp', wake: true }); f.pump();
+      assert.equal(sender.status(sent.messageId).status, 'delivered');
+    }
+  } finally { f.close(); }
+});
+
+test('follow-ups continue beyond sixteen sends and receives in the same process channels', () => {
+  const f = fixture();
+  try {
+    const a = f.client('a'); f.client('b'); const c = f.client('c');
+    for (let i = 0; i < 20; i++) {
+      for (const sender of [a, c]) {
+        const sent = sender.send({ agentId: 'b', text: `Round ${i}`, delivery: 'followUp', wake: i % 2 === 0 }); f.pump();
+        assert.equal(sender.status(sent.messageId).status, 'delivered');
+      }
+      f.advance(61000);
+    }
+    assert.equal(f.received.get('b').length, 40);
+    assert.equal(f.router.size, 3, 'No channel replacement was needed');
+  } finally { f.close(); }
+});
+
+test('overall message rate remains thirty per minute and recovers without replacing a process', () => {
+  const f = fixture();
+  try {
+    const a = f.client('a'); f.client('b');
+    for (let i = 0; i < 30; i++) {
+      const sent = a.send({ agentId: 'b', text: `Passive context ${i}` }); f.pump();
+      assert.equal(a.status(sent.messageId).status, 'delivered');
+    }
+    const limited = a.send({ agentId: 'b', text: 'Over the rolling limit' }); f.pump();
+    assert.equal(a.status(limited.messageId).code, 'MESSAGE_RATE');
+    f.advance(61000);
+    const recovered = a.send({ agentId: 'b', text: 'Fresh window', delivery: 'followUp', wake: true }); f.pump();
+    assert.equal(a.status(recovered.messageId).status, 'delivered');
   } finally { f.close(); }
 });
 
