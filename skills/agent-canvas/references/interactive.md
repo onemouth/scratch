@@ -2,6 +2,14 @@
 
 Interactive cards are a separate card type beside Markdown cards. They retain the normal immutable card ID, bidirectional links, tags, Card Library membership, saved/temporary views, Unfiled behavior, and Agent Canvas placement. Their default placement is 560×420 with a 320×240 minimum; aspect ratio is not fixed.
 
+## Contents
+
+- [Data and authoring](#data-and-authoring)
+- [Runtime and lifecycle](#runtime-and-lifecycle)
+- [Built-in JSXGraph](#built-in-jsxgraph)
+- [Private assets](#private-assets)
+- [API examples](#api-examples)
+
 ## Data and authoring
 
 Only the semantic API creates or changes executable source. There is no human HTML/CSS/JavaScript editor. An interactive card has:

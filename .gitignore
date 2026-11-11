@@ -2,3 +2,5 @@ node_modules/
 dist/
 native/canvas-shm/build/
 .DS_Store
+/docs/agent-api.md
+/docs/interactive-cards.md

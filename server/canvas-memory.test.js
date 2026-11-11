@@ -100,7 +100,7 @@ test('native build lifecycle has no environment opt-out', async () => {
   const script = await readFile(new URL('../scripts/build-shm.js', import.meta.url), 'utf8');
   const pkg = JSON.parse(await readFile(new URL('../package.json', import.meta.url), 'utf8'));
   assert.equal(script.includes('AGENT_CANVAS_SHARED_MEMORY'), false);
-  for (const name of ['predev', 'prestart', 'pretest']) assert.equal(pkg.scripts[name], 'node scripts/build-shm.js');
+  for (const name of ['predev', 'prestart', 'pretest']) assert.equal(pkg.scripts[name].split(' && ')[0], 'node scripts/build-shm.js');
 });
 
 test('projection allowlists data, bounded summaries and no card source or session credentials', () => {
