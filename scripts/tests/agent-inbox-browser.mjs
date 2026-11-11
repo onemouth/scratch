@@ -111,6 +111,7 @@ export async function testAgentInbox({ app, api, ev, send, wait, delay, boxAgent
     assert.equal(await ev(`(()=>{const r=document.querySelector('.agent-inbox-popover').getBoundingClientRect();return r.width>300&&r.right<=innerWidth&&r.bottom<=innerHeight})()`), true, 'Portal is readable independently of Canvas scale');
     await ev(`document.querySelector('[aria-label="Close pending inbox"]').click();document.querySelector('[aria-label="Maximize Inbox sender"]').click()`);
     await wait(`!!document.querySelector(${JSON.stringify(node + ' .agent-node.maximized')})`);
+    assert.equal(await ev(`[...document.querySelectorAll('button')].some(b=>/Vault/.test(b.textContent)&&b.getClientRects().length>0)`), false, 'No Vault button on maximized Agent Canvas agent');
     await actualClick(node + ' .agent-inbox-trigger'); await wait(`!!document.querySelector('.agent-inbox-message')`);
     assert.equal(await ev(`getComputedStyle(document.querySelector('.agent-inbox-popover')).position`), 'fixed');
     for (let i = 0; i < 5; i++) freshReceiver.send({ agentId: source.id, text: `Additional pending message ${i}` });

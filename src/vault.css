@@ -27,7 +27,6 @@
 .vault-list li > div:last-child { display: flex; flex-wrap: wrap; gap: 5px; justify-content: flex-end; }
 .vault-list button, .vault-status-row button, .vault-lock-row button { color: #dbe4f5; background: #26364f; border: 1px solid #4c5d78; border-radius: 5px; padding: 5px 8px; }
 
-.vault-floating-button { position: fixed; top: 8px; right: 10px; z-index: 10002; padding: 6px 11px; color: #f4efff; background: #493d69; border: 1px solid #8272aa; border-radius: 6px; box-shadow: 0 4px 18px #0007; font: 700 10px 'JetBrains Mono', monospace; }
 .vault-entries { display: grid; gap: 9px; margin: 8px 0 0; padding: 0; list-style: none; }
 .vault-entry { padding: 10px; background: #101a29; border: 1px solid #32415a; border-radius: 7px; }
 .vault-entry-head { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }

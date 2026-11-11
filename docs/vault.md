@@ -14,7 +14,7 @@ Reload/new/resume/fork inside the same Pi process retain per-key authorization. 
 
 Renaming a key cancels its pending requests and revokes its grants. Deleting it does the same. Recreating the same name creates a fresh internal entry identity and cannot inherit old grants. Updating a value without renaming its key retains the existing key grants. A request is pinned to the resolved entry, not a later replacement with the same name.
 
-Vault setup, key edits and reset do not affect library cards, card IDs/sequences, tags/links, placements or view membership. Management is available in the top-right panel in either workspace; a top-right shortcut remains available when a card is maximized.
+Vault setup, key edits and reset do not affect library cards, card IDs/sequences, tags/links, placements or view membership. Management is available in the top-right panel in either workspace. Maximized cards and Agents show no Vault button or floating shortcut; return to the normal workspace to open Vault.
 
 The frontend holds its control code, revealed values and editing state only in page memory, not local/session storage or ordinary card drafts. Hiding a reveal, closing its editor/panel, disconnecting controls, locking, or observing a new Vault epoch clears sensitive state. Disconnect removes this page's control access; it does not lock the backend. JavaScript garbage collection cannot guarantee secure memory erasure.
 

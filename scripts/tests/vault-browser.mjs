@@ -120,7 +120,8 @@ export async function testVault({ app, api, base, ev, send, wait, delay, boxAgen
     const node = `.react-flow__node-card[data-id="card-box-${placed.cardId}"]`;
     await ev(`document.querySelector(${JSON.stringify(node + ' [aria-label="Maximize card ' + placed.cardId + '"]')}).click()`);
     await wait(`!!document.querySelector(${JSON.stringify(node + ' .zettel-card.maximized')})`);
-    await ev(`document.querySelector('[aria-label="Open Vault controls"]').click()`); await wait(`!!document.querySelector('.vault-panel')`); await close();
+    assert.equal(await ev(`!!document.querySelector('.vault-floating-button, [aria-label="Open Vault controls"]')`), false, 'No floating Vault shortcut on maximized cards');
+    assert.equal(await ev(`[...document.querySelectorAll('button')].some(b=>/Vault/.test(b.textContent)&&b.getClientRects().length>0)`), false, 'No visible Vault button while maximized');
     await ev(`document.querySelector(${JSON.stringify(node + ' [aria-label="Return card ' + placed.cardId + ' to whiteboard"]')}).click()`);
   }
 
