@@ -99,6 +99,7 @@ try {
  await send('Emulation.setDeviceMetricsOverride',{width:1400,height:1000,deviceScaleFactor:1,mobile:false});
  await ev('document.querySelector("[aria-label=\\"Maximize Card box\\"]").click()');
  await wait('!!document.querySelector(".agent-node.maximized")');
+ assert.equal(await ev(`[...document.querySelectorAll('button')].some(b=>/Vault/.test(b.textContent)&&b.getClientRects().length>0)`),false,'No Vault button on maximized Card box agent');
  const maximized=await ev('(()=>{const r=document.querySelector(".agent-node.maximized").getBoundingClientRect();return{x:r.x,y:r.y,width:r.width,height:r.height}})()');
  for(const [k,value] of Object.entries({x:0,y:0,width:1400,height:1000}))assert.ok(Math.abs(maximized[k]-value)<1,k+' must fill webpage');
  assert.ok(await ev('window.originalTerminal===document.querySelector(".card-box-agent-sidebar .xterm")'));
