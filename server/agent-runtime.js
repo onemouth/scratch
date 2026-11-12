@@ -12,6 +12,10 @@ const failure = (message, status = 400) => Object.assign(new Error(message), { s
 export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBaseUrl, isClosing, broadcast, publishImmediate, getMemory = () => null, getMessaging = () => null, getTelemetry = () => null, getQueries = () => null, getVault = () => null, onChange = () => {} }) {
   const processes = new Map(), runs = new Map(), activity = new Map();
   const notify = onChange;
+  let scoreboardClock = 0;
+  // Process-local logical milliseconds: stable ordering even within one tick or
+  // after a wall-clock adjustment. Never persisted or reset on session handoff.
+  const scoreboardTick = () => (scoreboardClock = Math.max(Date.now(), scoreboardClock + 1));
   const requireAgent = id => {
     const agent = agents.get(id);
     if (!agent) throw failure('Agent not found', 404);
@@ -20,7 +24,7 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
   const describe = (agent, { includeOutput = false } = {}) => {
     const { output: _output, ...metadata } = agent;
     const current = activity.get(agent.id);
-    return { ...metadata, ...(includeOutput ? { output: agent.output } : {}), processGeneration: runs.get(agent.id)?.generation ?? null, activity: current?.state ?? 'unknown', ...(current?.summary ? { notificationSummary: current.summary } : {}) };
+    return { ...metadata, ...(includeOutput ? { output: agent.output } : {}), processGeneration: runs.get(agent.id)?.generation ?? null, scoreboardUpdatedAt: runs.get(agent.id)?.scoreboardUpdatedAt ?? 0, activity: current?.state ?? 'unknown', ...(current?.summary ? { notificationSummary: current.summary } : {}) };
   };
   const output = (agent, text) => {
     agent.output = (agent.output + text).slice(-MAX_OUTPUT);
@@ -42,7 +46,8 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
     agent.restoreWarning = restoring && !exactSession ? 'Original session unavailable. Select a conversation in Pi’s session picker.' : '';
     agent.status = 'running';
     agent.output = '';
-    runs.set(id, { generation: randomUUID(), ready: false, lastTelemetrySeq: 0 });
+    agent.note = ''; // A replacement process must never inherit old progress.
+    runs.set(id, { generation: randomUUID(), ready: false, lastTelemetrySeq: 0, scoreboardUpdatedAt: scoreboardTick() });
     activity.delete(id);
     const base = getBaseUrl();
     const instructions = `You are an agent on Agent Canvas. Your agent ID is ${id}. The local canvas API is at ${base}/api. When working with Canvas agents, delegation, messages, progress notes, or card-box cards, read and follow the agent-canvas skill. Load only the task-specific references selected by the skill; the full API guide is a troubleshooting fallback. Relationships represent real delegation, not automatic messaging. You may specify or adjust positions and sizes of Agent Canvas objects through the documented API; check conflicts and human interaction locks. Card box positions and viewports remain human-only.${agent.workspace === 'card-box' ? ' You are the single Card box agent. Use the Canvas API for card operations when asked; never directly edit SQLite, Canvas JSON, backup or lock files in your workdir.' : ''}`;
@@ -144,10 +149,12 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
       run.ready = true; agent.restoreWarning = '';
       broadcast();
     } else if (frame.kind === 'activity') {
+      if (activity.get(id)?.state !== frame.data.state) run.scoreboardUpdatedAt = scoreboardTick();
       activity.set(id, { state: frame.data.state, seq: frame.seq, ...(frame.data.summary ? { summary: frame.data.summary.trim() } : {}) });
       notify();
       publishImmediate(); // No disk write/coalescing of a fast working → idle turn.
     } else {
+      run.scoreboardUpdatedAt = scoreboardTick();
       agent.note = frame.data.text; broadcast();
     }
     return { ok: true };

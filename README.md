@@ -17,6 +17,8 @@ Use the single mouse/touchpad icon button beneath the bottom-left zoom controls 
 
 Right-click an **agent name** in its header and choose **Copy agent name** to copy its full name, or **Copy agent UUID** to copy the ID used by the API, including when the title is truncated or the agent is maximized. Keyboard users can focus the name and press **Shift+F10** or the context-menu key, then use Up/Down to choose an action and Enter to copy. Escape closes the menu; left-dragging the header still moves the node. Works in both Agent Canvas and Card box; clipboard access needs localhost or HTTPS and browser permission.
 
+Use **Board** in either workspace to see running Agent Canvas agents' names, status and latest progress, newest progress/status update first. Progress stays on one line (hover for the full text); click a row to locate/focus its Agent without maximizing. Outside click or Escape closes the panel. The entry is hidden during maximization. Agent windows no longer show inline progress, including the Card box Agent, which is excluded from Board. Idle retains progress; restarting a process clears it. See [Board behavior and SHM data flow](docs/scoreboard.md).
+
 Use **＋ Note** to add a yellow sticky note. Notes display only their body text, with no title. Drag only the paper's top edge to move it, resize the note when selected, and edit its text directly (saved when the editor loses focus). Text scales with the canvas while staying at least 14 screen pixels for readability. Hover over the note to reveal **×** in the top-right corner and delete it (also available with keyboard focus or on touch devices). Notes are independent of agents and are saved with the Canvas.
 
 ## Private Tailscale access (optional)

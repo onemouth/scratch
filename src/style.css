@@ -64,7 +64,6 @@ button:disabled { opacity: .4; cursor: not-allowed; }
 .node-header .icon-btn { width: 18px; height: 18px; padding: 0; flex: none; display: grid; place-items: center; font-size: 14px; line-height: 1; }
 .node-header .icon-btn svg { width: 13px; height: 13px; }
 .node-subtitle { padding: 7px 14px; color: #8392ad; font: 10px 'JetBrains Mono', monospace; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; border-bottom: 1px solid #28354b; }
-.node-note { padding: 6px 14px; color: #b4c3e4; font-size: 11px; background: #233149; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
 .terminal { flex: 1; min-height: 30px; padding: 6px 3px 4px 9px; background: #101927; overflow: hidden; }
 .terminal .xterm { height: 100%; }
 .terminal .xterm-viewport { overflow-y: auto !important; }

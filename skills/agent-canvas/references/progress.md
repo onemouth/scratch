@@ -4,4 +4,4 @@ Use `canvas_set_progress({text:"Reviewing SHM synchronization"})` for your own p
 
 Progress notes use only SHM telemetry. Agent HTTP PATCH accepts name and Agent Canvas geometry; validation failures reject the entire update.
 
-Agent progress notes are at most 500 characters and appear on the node. Only update **your own** progress note. Independently, Agent Canvas `x,y,width,height` may be adjusted on any agent through the layout contract above; Card Box geometry remains human-only.
+Agent progress notes are at most 500 characters. Agent Canvas progress appears in the Board panel (single line, hover for full text), not on Agent windows. Card box Agents are excluded from Board; their progress remains available through SHM summaries. Idle retains progress; a new process clears it. Only update **your own** progress note. Independently, Agent Canvas `x,y,width,height` may be adjusted on any agent through the layout contract above; Card Box geometry remains human-only.
