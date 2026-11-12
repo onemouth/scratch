@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { Terminal } from '@xterm/xterm';
 import { pasteChunks } from './terminal-paste.js';
+import { attachTerminalTouchScroll } from './mobile-terminal-touch.js';
 
 // An observer never fits/resizes the PTY. Binary frames carry authoritative
 // dimensions; text frames remain the same ANSI output used by desktop xterm.
@@ -46,32 +47,7 @@ export function MobileTerminal({ id, generation, connected }) {
       event.preventDefault(); event.stopImmediatePropagation();
       if (enabled && available) for (const data of pasteChunks(event.clipboardData.getData('text/plain'))) send({ type: 'input', data });
     };
-    // xterm 6's virtual scrollbar is not a native touch scroll container.
-    // Vertical swipes use its public scroll API; horizontal pan/pinch and
-    // stationary long-press selection remain browser gestures.
-    let touch = null;
-    const touchStart = event => {
-      touch = event.touches.length === 1 ? { x: event.touches[0].clientX, y: event.touches[0].clientY, active: false, remainder: 0 } : null;
-    };
-    const touchMove = event => {
-      if (!touch || event.touches.length !== 1) { touch = null; return; }
-      const point = event.touches[0], dx = point.clientX - touch.x, dy = touch.y - point.clientY;
-      if (!touch.active && (Math.abs(dy) < 6 || Math.abs(dy) <= Math.abs(dx))) return;
-      touch.active = true; event.preventDefault();
-      const prior = viewport.scrollTop;
-      viewport.scrollTop += dy;
-      const remaining = dy - (viewport.scrollTop - prior) + touch.remainder;
-      const cellHeight = parseFloat(terminal.element.querySelector('.xterm-screen').style.height) / terminal.rows || 18;
-      const lines = Math.trunc(remaining / cellHeight);
-      if (lines) terminal.scrollLines(lines);
-      touch.remainder = remaining - lines * cellHeight;
-      touch.x = point.clientX; touch.y = point.clientY; updateLatest();
-    };
-    const touchEnd = () => { touch = null; };
-    element.addEventListener('touchstart', touchStart, { passive: true });
-    element.addEventListener('touchmove', touchMove, { passive: false });
-    element.addEventListener('touchend', touchEnd);
-    element.addEventListener('touchcancel', touchEnd);
+    const detachTouch = attachTerminalTouchScroll(viewport, terminal, updateLatest);
     element.addEventListener('paste', paste, true);
     const connect = () => {
       if (!alive) return;
@@ -103,7 +79,7 @@ export function MobileTerminal({ id, generation, connected }) {
       };
     };
     width(); connect();
-    return () => { alive = false; available = false; enabled = false; clearTimeout(retry); socket?.close(); control.current = null; element.removeEventListener('paste', paste, true); viewport.removeEventListener('scroll', updateLatest); element.removeEventListener('touchstart', touchStart); element.removeEventListener('touchmove', touchMove); element.removeEventListener('touchend', touchEnd); element.removeEventListener('touchcancel', touchEnd); input.dispose(); scroll.dispose(); terminal.dispose(); };
+    return () => { alive = false; available = false; enabled = false; clearTimeout(retry); socket?.close(); control.current = null; element.removeEventListener('paste', paste, true); viewport.removeEventListener('scroll', updateLatest); detachTouch(); input.dispose(); scroll.dispose(); terminal.dispose(); };
   }, [id, generation]);
   useEffect(() => { if (!connected) control.current?.mode(false); }, [connected]);
   return <section className="mobile-terminal" aria-label="Agent terminal">

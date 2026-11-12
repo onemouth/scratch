@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { writeFile } from 'node:fs/promises';
+import { WebSocket } from 'ws';
 
 export async function testMobile({ app, api, ev, send, wait, delay, children }) {
   const screenshot = async name => { if (process.env.CANVAS_MOBILE_SCREENSHOT_PREFIX) await writeFile(`${process.env.CANVAS_MOBILE_SCREENSHOT_PREFIX}-${name}.png`, Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64')); };
@@ -61,6 +62,21 @@ export async function testMobile({ app, api, ev, send, wait, delay, children }) 
     const monitoredInputs = child.writes.length;
     await send('Input.insertText', { text: 'must not send' });
     await delay(40); assert.equal(child.writes.length, monitoredInputs);
+    // A desktop client may leave a narrow PTY: blank space to its right must
+    // still accept a one-finger history drag, not just xterm's screen element.
+    const desktop = new WebSocket(`ws://127.0.0.1:${app.server.address().port}/api/terminal/${agent.id}`);
+    try {
+      await new Promise((resolve, reject) => { desktop.once('open', resolve); desktop.once('error', reject); });
+      desktop.send(JSON.stringify({ type: 'resize', cols: 20, rows: 10 }));
+      await wait(`document.querySelector('.mobile-terminal-canvas').getBoundingClientRect().width<250`);
+    } finally { desktop.terminate(); }
+    const blank = await ev(`(()=>{const r=document.querySelector('.mobile-terminal-scroll').getBoundingClientRect();return{x:r.right-16,y:r.top+30}})()`);
+    assert.ok(blank.x > await ev(`document.querySelector('.mobile-terminal-canvas').getBoundingClientRect().right`));
+    await send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [blank] });
+    await send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: blank.x, y: blank.y + 140 }] });
+    await send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] });
+    await wait(`Array.from(document.querySelectorAll('.mobile-terminal-tools button')).some(button=>button.textContent==='Latest ↓')`);
+    assert.equal(child.writes.length, monitoredInputs, 'history drag cannot send terminal input');
     await click(`document.querySelector('[aria-label="Back to Board"]')`);
     await click(`document.querySelector('.mobile-tabs button:last-child')`);
     await wait(`!document.querySelector('.mobile-cards').hidden`);

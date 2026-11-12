@@ -27,8 +27,8 @@
 .mobile-terminal-tools span { flex: 1; font-size: 12px; }
 .mobile-terminal-keys { flex-wrap: wrap; }
 .mobile-terminal-keys button { flex: 1; touch-action: manipulation; }
-.mobile-terminal-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; background: #101927; }
-.mobile-terminal-canvas { height: 100%; touch-action: pan-x pinch-zoom; }
+.mobile-terminal-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; touch-action: pan-x pinch-zoom; background: #101927; }
+.mobile-terminal-canvas { height: 100%; }
 .mobile-terminal-canvas > .xterm { height: 100%; }
 .mobile-terminal-canvas .xterm-viewport { background: #101927; }
 .mobile-cards label { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
