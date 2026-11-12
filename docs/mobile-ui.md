@@ -8,6 +8,7 @@ At layout viewport widths below **768 CSS pixels**, Scratch automatically shows 
 - Tap an Agent to open one real xterm terminal. Back returns to the retained Board list. Switching bottom tabs closes the detail view and its browser terminal subscription, not the Agent process.
 - Monitoring is the default. The terminal textarea is read-only, does not auto-focus or summon a keyboard, and terminal input is gated both in the client and on its mobile WebSocket connection.
 - **Input** explicitly enables typing. **Monitor** disables it and blurs the textarea. Esc, Tab, Ctrl+C and Enter buttons assist terminal interaction. Paste uses existing chunking and does not replay on reconnect.
+- One-finger vertical dragging scrolls history across the whole terminal viewport, including blank space outside a narrow PTY. History swipe sensitivity is 2×; glyphs remain row-aligned with no pixel translation or simulated momentum. Capture handlers keep vertical drags out of terminal input. Horizontal pan/pinch remain browser gestures.
 - Scrollback is xterm's bounded buffer, not a full conversation transcript. The existing bounded ANSI replay is retained; no new transcript or history store is introduced. Scroll away from the bottom without forced follow; **Latest** returns to current output.
 - Disconnection disables input. Reconnection starts in monitoring mode and requires fresh opt-in. Offline browser events also disable input and suspend the mobile event stream; online opens a fresh stream. Data is labeled potentially outdated until a snapshot arrives.
 - Each mobile subscription is pinned to the selected process generation. Process end closes it; a new generation mounts a new monitoring terminal, never inheriting input permission.
@@ -40,6 +41,7 @@ The app uses `visualViewport` height/offset and safe-area insets for the keyboar
 
 Automated checks:
 - `src/mobile-state.test.js`: pure local View/search/tag projections and excluded Card box Agent.
+- `src/mobile-terminal-touch.test.js`: double-speed history dragging, row alignment, fractional accumulation, horizontal/multi-touch behavior and cleanup.
 - `server/mobile-terminal.test.js`: real WebSockets, dimensions, ANSI replay, explicit input opt-in, ignored mobile resizing, desktop compatibility and generation fencing.
 - `scripts/tests/mobile-browser.mjs`: disposable Chrome, fake PTYs and database; automatic UI, monitor/input, Chinese text insertion, keys, viewport changes, local read-only Cards/math/Play, no HTTP mutations or geometry/View changes, process replacement, offline recovery and desktop restoration. Included in `npm run test:views:browser`; `CANVAS_MOBILE_ONLY=1 npm run test:views:browser` runs just mobile integration.
 
