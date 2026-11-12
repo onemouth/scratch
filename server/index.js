@@ -16,6 +16,7 @@ import { createCanvasOperations } from './canvas-operations.js';
 import { createHttpHandler, reply } from './http-routes.js';
 import { attachTerminalTransport } from './terminal-transport.js';
 import { createCanvasMemory } from './canvas-memory.js';
+import { scoreboardRows } from '../shared/scoreboard.js';
 import { createCanvasMessaging } from './canvas-messages.js';
 import { createCanvasQueries } from './canvas-queries.js';
 import { queryError, queryPage } from '../shared/canvas-queries.js';
@@ -67,7 +68,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     } : agent),
     edges: [...edges.values()], notes: [...notes.values()], cardPlacements: [...cardPlacements.values()],
     cardBox: views?.snapshot({ live }) ?? { placements: [] },
-    ...(live ? { cards: cards?.list({ includeInteractiveSource: false }) ?? [], vault: vault?.status() } : {}),
+    ...(live ? { scoreboard: scoreboardRows(runtime.list()), cards: cards?.list({ includeInteractiveSource: false }) ?? [], vault: vault?.status() } : {}),
     persistence: { enabled: !!stateFile, error: saveError },
   });
   const flush = () => {

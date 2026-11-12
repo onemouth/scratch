@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import { scoreboardRows } from '../shared/scoreboard.js';
 import { nativeMemory, memoryName, MEMORY_PROTOCOL, DEFAULT_CAPACITY } from '../shared/canvas-memory.js';
 
 const pick = (value, keys) => Object.fromEntries(keys.filter(key => value[key] !== undefined).map(key => [key, value[key]]));
@@ -7,7 +8,8 @@ const geometry = ['id', 'x', 'y', 'width', 'height'];
 // environment, Interactive source/assets, or the entire persistence snapshot.
 export function canvasMemoryProjection({ agents, edges, notes, cards, cardPlacements }) {
   return {
-    agents: agents.map(agent => pick(agent, [...geometry, 'name', 'workspace', 'workdir', 'status', 'activity', 'note', 'processGeneration'])),
+    scoreboard: scoreboardRows(agents),
+    agents: agents.map(agent => pick(agent, [...geometry, 'name', 'workspace', 'workdir', 'status', 'activity', 'note', 'processGeneration', 'scoreboardUpdatedAt'])),
     edges: edges.map(edge => pick(edge, ['id', 'source', 'target', 'type', 'label'])),
     notes: notes.map(note => ({ ...pick(note, [...geometry, 'title']), summary: (note.text ?? '').slice(0, 500) })),
     cards: cards.map(card => ({ ...pick(card, ['id', 'type', 'tags', 'links', 'updatedAt']),

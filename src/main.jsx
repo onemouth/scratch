@@ -16,6 +16,7 @@ import { includeCreatedAgent, agentsToFocus } from './agent-state.js';
 import { CardNode, reconcileCardDrafts } from './cards.jsx';
 import { AgentName } from './agent-name.jsx';
 import { AgentInbox } from './agent-inbox.jsx';
+import { Scoreboard } from './scoreboard.jsx';
 import { beginLayoutInteraction, completeLayoutInteraction, humanLayoutHeaders } from './layout-interaction.js';
 import { CardLibrary, ViewControls } from './card-views.jsx';
 import { mergeViewResponse, mergeViewSnapshot, nodeMeasurement as measuredLike } from './card-view-state.js';
@@ -134,7 +135,6 @@ function AgentNode({ id, data, selected }) {
       {agent.status === 'stopped' && !data.cardBox && <button className="icon-btn nodrag" title="Remove node from canvas" aria-label={`Remove ${agent.name} from canvas`} onClick={remove}>×</button>}
     </header>
     <div className="node-subtitle" title={agent.workdir}>{agent.workdir}</div>
-    {agent.note && <div className="node-note" title={agent.note}>{agent.note}</div>}
     <PtyTerminal id={id} stopped={agent.status === 'stopped'} focusRequest={data.maximized ? `maximized-${data.maximizeFocus}` : data.focusRequest} />
     {agent.restoreWarning && <div className="node-error">{agent.restoreWarning}</div>}
     {error && <div className="node-error">{error}</div>}
@@ -212,6 +212,7 @@ function Canvas() {
   const [workdirsLoading, setWorkdirsLoading] = useState(false);
   const [workdirsError, setWorkdirsError] = useState('');
   const [docsOpen, setDocsOpen] = useState(false);
+  const [scoreboardOpen, setScoreboardOpen] = useState(false);
   const [mode, setMode] = useState(() => {
     try { return localStorage.getItem('agent-canvas:workspace') === 'card-box' ? 'card-box' : 'agents'; } catch { return 'agents'; }
   });
@@ -248,6 +249,7 @@ function Canvas() {
   const applyingViewport = React.useRef(false);
   const appliedViewport = React.useRef(null);
   const viewportSequence = React.useRef(0);
+  const [viewportReady, setViewportReady] = useState(null);
   const viewportGesture = React.useRef(null);
   const fitViewRequest = React.useRef(null);
   const pendingViewports = React.useRef(new Map());
@@ -300,6 +302,12 @@ function Canvas() {
     if (cardBox) setAgentSidebarOpen(true);
     setFocusTarget({ id, request: ++focusSequence.current });
   }, []);
+  const navigateScoreboard = useCallback((id, generation) => {
+    const agent = stateRef.current.agents.find(agent => agent.id === id && agent.processGeneration === generation && agent.status === 'running' && agent.workspace !== 'card-box');
+    if (!agent) return;
+    setMaximizedId(null);
+    focusAgent(id, 'agents');
+  }, [focusAgent]);
   const switchMode = () => { setMaximizedId(null); setFocusTarget(null); setMode(value => value === 'agents' ? 'card-box' : 'agents'); };
 
   useEffect(() => {
@@ -376,7 +384,7 @@ function Canvas() {
         return {
           id: agent.id, type: 'agent', measured: measuredLike(old, agent.width, agent.height), dragging: old?.dragging, position: old?.dragging ? old.position : { x: agent.x, y: agent.y },
           style: { width: agent.width, height: agent.height, visibility: ((agent.workspace === 'card-box') === (mode === 'card-box')) ? 'visible' : 'hidden', pointerEvents: ((agent.workspace === 'card-box') === (mode === 'card-box')) ? 'auto' : 'none' }, zIndex: maximizedId === agent.id ? 10000 : undefined,
-          data: { agent, cardBox: agent.workspace === 'card-box', workspace: agent.workspace === 'card-box' ? 'card-box' : 'agents', position: old?.dragging ? old.position : { x: agent.x, y: agent.y }, maximized: maximizedId === agent.id, onMaximize: maximizeNode, maximizeFocus, onFocus: focusAgent, focusRequest: !open && !docsOpen && !vault.panel && focusTarget?.id === agent.id ? focusTarget.request : 0 }, selected: old?.selected,
+          data: { agent, cardBox: agent.workspace === 'card-box', workspace: agent.workspace === 'card-box' ? 'card-box' : 'agents', position: old?.dragging ? old.position : { x: agent.x, y: agent.y }, maximized: maximizedId === agent.id, onMaximize: maximizeNode, maximizeFocus, onFocus: focusAgent, focusRequest: !open && !docsOpen && !scoreboardOpen && !vault.panel && focusTarget?.id === agent.id ? focusTarget.request : 0 }, selected: old?.selected,
         };
       }), ...(state.notes || []).map(note => {
         const old = byId.get(note.id);
@@ -395,7 +403,7 @@ function Canvas() {
         return [{ id, type: 'card', measured: measuredLike(old, placement.width, placement.height), dragging, dragHandle: '.card-drag-handle', position, style: { width: placement.width, height: placement.height, visibility: mode === 'card-box' ? 'visible' : 'hidden', pointerEvents: mode === 'card-box' ? 'auto' : 'none' }, zIndex: maximizedId === id ? 10000 : undefined, data: { card, placement, restorePlacement, cardBox: true, viewId: state.cardBox.activeViewId, systemView, onExploreTag: exploreTag, onExploreLink: exploreLink, inAgentCanvas: (state.cardPlacements || []).some(item => item.cardId === card.id), workspace: 'card-box', position, maximized: maximizedId === id, onMaximize: maximizeNode }, selected: old?.selected }];
       })];
     });
-  }, [mode, state.cardBox, state.agents, state.notes, state.cards, state.cardPlacements, focusTarget, open, docsOpen, vault.panel, focusAgent, exploreTag, exploreLink, maximizedId, maximizeNode, maximizeFocus]);
+  }, [mode, state.cardBox, state.agents, state.notes, state.cards, state.cardPlacements, focusTarget, open, docsOpen, scoreboardOpen, vault.panel, focusAgent, exploreTag, exploreLink, maximizedId, maximizeNode, maximizeFocus]);
   useEffect(() => {
     const docked = mode === 'card-box' && state.agents.some(agent => agent.id === maximizedId && agent.workspace === 'card-box');
     if (maximizedId && !docked && !nodes.some(node => node.id === maximizedId && node.data.workspace === mode)) setMaximizedId(null);
@@ -430,6 +438,7 @@ function Canvas() {
     const sequence = ++viewportSequence.current;
     const fitCreated = mode === 'card-box' && fitViewRequest.current === box?.activeViewId;
     applyingViewport.current = true;
+    setViewportReady(null);
     let operation;
     if (fitCreated) operation = fitView({ nodes: nodes.filter(node => node.type === 'card' && node.data.viewId === box.activeViewId).map(node => ({ id: node.id })), padding: 0.2 });
     else if (target) operation = setViewport(target);
@@ -438,6 +447,7 @@ function Canvas() {
     Promise.resolve(operation).then(() => {
       if (sequence !== viewportSequence.current) return;
       applyingViewport.current = false;
+      setViewportReady(key);
       if (fitCreated && fitViewRequest.current === box.activeViewId) {
         fitViewRequest.current = null;
         persistViewport(box.activeViewId, getViewport()).catch(e => setError(e.message));
@@ -463,15 +473,18 @@ function Canvas() {
     persistViewport(box?.activeViewId, viewport).catch(e => setError(e.message));
   }, [mode, persistViewport, setViewport]);
   useEffect(() => {
-    if (!focusTarget || open || docsOpen || vault.panel || centeredRequest.current === focusTarget.request) return;
+    if (!focusTarget || open || docsOpen || scoreboardOpen || vault.panel || centeredRequest.current === focusTarget.request) return;
     const node = nodes.find(node => node.id === focusTarget.id);
-    if (!node || node.data.workspace !== mode) return;
+    // Workspace restoration must finish before navigation centers the node;
+    // otherwise the old workspace viewport can overwrite this focus request.
+    const expectedViewport = mode === 'agents' ? 'agents' : 'card-box:' + state.cardBox?.activeViewId;
+    if (!node || node.data.workspace !== mode || node.style.visibility !== 'visible' || viewportReady !== expectedViewport || applyingViewport.current) return;
     centeredRequest.current = focusTarget.request;
     setNodes(previous => previous.map(item => ({ ...item, selected: item.id === node.id })));
     // Center within the currently visible viewport, not at canvas origin;
     // preserve the user's current zoom level while bringing the node into view.
     setCenter(node.position.x + node.style.width / 2, node.position.y + node.style.height / 2, { zoom: getZoom(), duration: 200 });
-  }, [nodes, mode, focusTarget, open, docsOpen, vault.panel, setCenter, getZoom]);
+  }, [nodes, mode, state.cardBox?.activeViewId, viewportReady, focusTarget, open, docsOpen, scoreboardOpen, vault.panel, setCenter, getZoom]);
   const onNodesChange = useCallback(changes => setNodes(ns => applyNodeChanges(changes, ns)), []);
   const dragInteractions = React.useRef(new Map());
   useEffect(() => () => { for (const finish of dragInteractions.current.values()) finish(); }, []);
@@ -532,11 +545,11 @@ function Canvas() {
     <div className={`topbar${mode === 'card-box' ? ' has-view-controls' : ''}`}>
       <div className="workspace-nav"><div className="brand"><span className="brand-icon">✳</span> {mode === 'card-box' ? 'Card box' : 'Agent Canvas'} <small>PI WORKSPACE</small></div><button type="button" className="guide-button" onClick={switchMode}>{mode === 'agents' ? 'Card box' : 'Agent Canvas'}</button></div>
       {mode === 'card-box' && <ViewControls box={state.cardBox} libraryOpen={libraryOpen} onLibrary={() => setLibraryOpen(v => !v)} onChange={mergeBox} onError={setError} beforeSwitch={beforeViewSwitch} exploreRequest={exploreRequest} onExploreCreated={id => { fitViewRequest.current = id; }} />}
-      <div className="top-actions">{mode === 'card-box' && boxAgent && <button type="button" className="guide-button" aria-label={agentSidebarOpen ? 'Hide Card box agent' : 'Show Card box agent'} aria-expanded={agentSidebarOpen} aria-controls="card-box-agent-sidebar" onClick={() => setAgentSidebarOpen(value => !value)}>Agent {agentSidebarOpen ? '→' : '←'}</button>}<span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button notification-toggle" type="button" aria-label={notificationsEnabled ? 'Disable browser notifications' : 'Enable browser notifications'} title={notificationsEnabled ? 'Browser notifications on · click to turn off' : 'Browser notifications off · click to enable'} aria-pressed={notificationsEnabled} onClick={toggleNotifications}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4" />{!notificationsEnabled && <path d="M3 3l18 18" />}</svg></button>{mode === 'agents' && <button className="guide-button" onClick={resetCanvas}>Reset Canvas</button>}<button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" title={vaultPending ? `${vaultPending} pending Vault request(s)` : 'Vault controls'} onClick={() => vault.openPanel('manage')}>{vaultLabel}</button><button className="guide-button" onClick={createCard}>＋ Card</button>{mode === 'agents' ? <><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></> : !state.agents.some(agent => agent.workspace === 'card-box') && <button className="primary" onClick={launchBoxAgent}>Start Card box agent</button>}</div>
+      <div className="top-actions"><Scoreboard rows={state.scoreboard || []} connected={connected} hidden={!!maximizedId} open={scoreboardOpen} setOpen={setScoreboardOpen} onShow={() => setFocusTarget(null)} onNavigate={navigateScoreboard} />{mode === 'card-box' && boxAgent && <button type="button" className="guide-button" aria-label={agentSidebarOpen ? 'Hide Card box agent' : 'Show Card box agent'} aria-expanded={agentSidebarOpen} aria-controls="card-box-agent-sidebar" onClick={() => setAgentSidebarOpen(value => !value)}>Agent {agentSidebarOpen ? '→' : '←'}</button>}<span className={`connection ${connected ? '' : 'offline'}`}>{connected ? '● Connected' : '○ Reconnecting'}</span><button className="guide-button notification-toggle" type="button" aria-label={notificationsEnabled ? 'Disable browser notifications' : 'Enable browser notifications'} title={notificationsEnabled ? 'Browser notifications on · click to turn off' : 'Browser notifications off · click to enable'} aria-pressed={notificationsEnabled} onClick={toggleNotifications}><svg viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round"><path d="M18 8a6 6 0 0 0-12 0c0 7-3 8-3 9h18c0-1-3-2-3-9M10 21h4" />{!notificationsEnabled && <path d="M3 3l18 18" />}</svg></button>{mode === 'agents' && <button className="guide-button" onClick={resetCanvas}>Reset Canvas</button>}<button className="guide-button" onClick={() => setDocsOpen(true)}>API Guide</button><button className="guide-button" title={vaultPending ? `${vaultPending} pending Vault request(s)` : 'Vault controls'} onClick={() => vault.openPanel('manage')}>{vaultLabel}</button><button className="guide-button" onClick={createCard}>＋ Card</button>{mode === 'agents' ? <><button className="guide-button" onClick={createNote}>＋ Note</button><button className="primary" onClick={openLaunch}>＋ New agent</button></> : !state.agents.some(agent => agent.workspace === 'card-box') && <button className="primary" onClick={launchBoxAgent}>Start Card box agent</button>}</div>
     </div>
     {mode === 'card-box' && libraryOpen && <CardLibrary cards={state.cards || []} box={state.cardBox} onChange={mergeBox} onClose={() => setLibraryOpen(false)} />}
     {boxAgent && <aside id="card-box-agent-sidebar" className={`card-box-agent-sidebar${boxAgentMaximized ? ' is-maximized' : ''}`} data-id={boxAgent.id} aria-label="Card box agent" style={{ display: mode === 'card-box' && (agentSidebarOpen || boxAgentMaximized) && (!maximizedId || boxAgentMaximized) ? undefined : 'none' }}>
-      <AgentNode id={boxAgent.id} data={{ agent: boxAgent, cardBox: true, docked: true, onHide: () => setAgentSidebarOpen(false), maximized: boxAgentMaximized, onMaximize: maximizeNode, maximizeFocus, onFocus: focusAgent, focusRequest: mode === 'card-box' && agentSidebarOpen && !open && !docsOpen && !vault.panel && focusTarget?.id === boxAgent.id ? focusTarget.request : 0 }} />
+      <AgentNode id={boxAgent.id} data={{ agent: boxAgent, cardBox: true, docked: true, onHide: () => setAgentSidebarOpen(false), maximized: boxAgentMaximized, onMaximize: maximizeNode, maximizeFocus, onFocus: focusAgent, focusRequest: mode === 'card-box' && agentSidebarOpen && !open && !docsOpen && !scoreboardOpen && !vault.panel && focusTarget?.id === boxAgent.id ? focusTarget.request : 0 }} />
     </aside>}
     <div className={`flow-area${mode === 'card-box' && state.cardBox?.views ? ' box-flow' : ''}${mode === 'card-box' && libraryOpen ? ' with-library' : ''}${mode === 'card-box' && boxAgent && agentSidebarOpen ? ' with-agent-sidebar' : ''}`}>
     <ReactFlow onMoveStart={onMoveStart} onMoveEnd={onMoveEnd} proOptions={{ hideAttribution: true }} nodes={nodes} edges={edges} nodeTypes={nodeTypes} edgeTypes={edgeTypes} onNodesChange={onNodesChange} onNodeDragStart={onNodeDragStart} onNodeDragStop={onNodeDragStop} onConnect={onConnect} onEdgeClick={async (_, edge) => { if (confirm('Remove this delegation relationship?')) await api(`/edges/${edge.id}`, 'DELETE').catch(e => setError(e.message)); }} panOnDrag={!maximizedId && (pointerMode === 'mouse' ? [2] : true)} panOnScroll={!maximizedId && pointerMode === 'touchpad'} panOnScrollSpeed={1} zoomOnScroll={!maximizedId && pointerMode === 'mouse'} zoomOnPinch={!maximizedId} nodesDraggable={!maximizedId} nodesConnectable={!maximizedId && mode === 'agents'} zoomOnDoubleClick={false} onPaneContextMenu={e => e.preventDefault()} minZoom={0.2} maxZoom={2} connectionLineStyle={{ stroke: '#8aa3e8', strokeWidth: 2 }}>

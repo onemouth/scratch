@@ -11,6 +11,7 @@ import { queryFixture } from './query-fixture.js';
 import { testCanvasLayout } from './canvas-layout-browser.mjs';
 import { testAgentInbox } from './agent-inbox-browser.mjs';
 import { testVault } from './vault-browser.mjs';
+import { testScoreboard } from './scoreboard-browser.mjs';
 // All servers, data, PTYs and browser profiles below belong to this fixture.
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const require = createRequire(join(root,'package.json'));
@@ -414,7 +415,8 @@ try {
  console.log('Interactive metadata read/edit overflow and real wheel scrolling at canvas zoom and maximized size passed');
  await testAgentInbox({ app, api, ev, send, wait, delay, boxAgentId: boxAgent.id });
  await testVault({ app, api, base, ev, send, wait, delay, boxAgentId: boxAgent.id });
- assert.deepEqual(errors, [], 'No browser runtime errors, including Inbox and Vault');
+ await testScoreboard({ app, api, ev, send, wait, delay, boxAgentId: boxAgent.id });
+ assert.deepEqual(errors, [], 'No browser runtime errors, including Inbox, Vault and Scoreboard');
  }
 }finally{
  ws?.close();if(chrome?.pid&&chrome.exitCode===null&&chrome.signalCode===null){const exited=new Promise(r=>chrome.once('exit',r));chrome.kill('SIGTERM');await Promise.race([exited,delay(3000)]);if(chrome.exitCode===null&&chrome.signalCode===null){chrome.kill('SIGKILL');await exited;}}
