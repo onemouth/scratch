@@ -1,0 +1,46 @@
+.mobile-app { position: fixed; top: var(--mobile-top, 0px); left: 0; right: 0; height: var(--mobile-height, 100dvh); display: flex; flex-direction: column; background: #101724; padding-top: env(safe-area-inset-top); font-size: 15px; }
+.mobile-app [hidden] { display: none !important; }
+.mobile-app button, .mobile-app select, .mobile-app input { min-height: 44px; font: inherit; }
+.mobile-app button, .mobile-app select { color: #e7edfa; background: #202e44; border: 1px solid #45536d; border-radius: 6px; padding: 8px 12px; }
+.mobile-app button:focus-visible, .mobile-app input:focus-visible, .mobile-app select:focus-visible { outline: 2px solid #b7c6ff; outline-offset: -2px; }
+.mobile-header { display: flex; align-items: center; gap: 10px; padding: 8px 12px; flex-shrink: 0; border-bottom: 1px solid #33415a; }
+.mobile-header h1 { flex: 1; min-width: 0; margin: 0; font-size: 18px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; outline: none; }
+.mobile-header > span { font-size: 12px; white-space: nowrap; }
+.mobile-connected { color: #a0dcbf; }
+.mobile-offline, .mobile-warning { color: #e7c38c; }
+.mobile-warning { margin: 0; padding: 8px 12px; font-size: 12px; }
+.mobile-list { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; padding: 12px; }
+.mobile-list ul { list-style: none; margin: 0; padding: 0; }
+.mobile-list li { margin-bottom: 10px; }
+.mobile-board li > button { display: grid; grid-template-columns: minmax(0, 1fr) auto; width: 100%; gap: 8px; text-align: left; }
+.mobile-agent-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 600; }
+.mobile-agent-status { color: #a7b7d1; font-size: 12px; }
+.mobile-agent-status.working { color: #b6c6ff; }
+.mobile-agent-status.idle { color: #a0dcbf; }
+.mobile-agent-progress { grid-column: 1 / -1; display: -webkit-box; -webkit-line-clamp: 3; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; color: #b5c2d7; line-height: 1.5; white-space: pre-wrap; }
+.mobile-tabs { display: flex; gap: 8px; flex-shrink: 0; padding: 8px 12px max(8px, env(safe-area-inset-bottom)); border-top: 1px solid #33415a; }
+.mobile-tabs button { flex: 1; }
+.mobile-tabs [aria-current="page"] { background: #364a74; border-color: #9db2ed; }
+.mobile-agent-detail, .mobile-terminal { display: flex; flex: 1; flex-direction: column; min-height: 0; min-width: 0; }
+.mobile-agent-summary { flex-shrink: 0; margin: 0; padding: 8px 12px; max-height: 82px; overflow: auto; overflow-wrap: anywhere; font-size: 12px; color: #b5c2d7; }
+.mobile-terminal-tools, .mobile-terminal-keys { display: flex; align-items: center; flex-shrink: 0; gap: 8px; padding: 6px 12px; }
+.mobile-terminal-tools span { flex: 1; font-size: 12px; }
+.mobile-terminal-keys { flex-wrap: wrap; }
+.mobile-terminal-keys button { flex: 1; touch-action: manipulation; }
+.mobile-terminal-scroll { flex: 1; min-height: 0; overflow: auto; overscroll-behavior: contain; background: #101927; }
+.mobile-terminal-canvas { height: 100%; touch-action: pan-x pinch-zoom; }
+.mobile-terminal-canvas > .xterm { height: 100%; }
+.mobile-terminal-canvas .xterm-viewport { background: #101927; }
+.mobile-cards label { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; }
+.mobile-cards select { flex: 1; min-width: 0; max-width: 100%; }
+.mobile-cards input[type="search"] { display: block; width: 100%; margin-bottom: 10px; padding: 8px 12px; border: 1px solid #45536d; border-radius: 6px; color: #e7edfa; background: #151f30; font-size: 16px; }
+.mobile-card-preview { width: 100%; text-align: left; }
+.mobile-card-preview > span { display: -webkit-box; -webkit-line-clamp: 4; -webkit-box-orient: vertical; overflow: hidden; overflow-wrap: anywhere; white-space: pre-wrap; }
+.mobile-card-preview small { display: block; margin-top: 8px; color: #a7b7d1; overflow-wrap: anywhere; }
+.mobile-pagination { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.mobile-card-reader { background: #e1e8f5; color: #202a40; border-radius: 8px; padding: 12px 0; min-height: 100%; }
+.mobile-card-reader h2, .mobile-card-reader footer { padding: 0 12px; overflow-wrap: anywhere; }
+.mobile-card-reader .card-markdown { font-size: 16px; }
+.mobile-card-reader .mobile-tags, .mobile-card-reader nav { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 10px; }
+.mobile-interactive { height: min(65dvh, 600px); min-height: 240px; }
+.mobile-card-reader .card-audio button { color: #202a40; background: #cad4ec; }

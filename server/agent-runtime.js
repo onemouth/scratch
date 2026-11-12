@@ -96,7 +96,10 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
     }
     agents.set(id, agent);
     processes.set(id, child);
-    for (const ws of terminals.get(id) || []) if (ws.readyState === WebSocket.OPEN) ws.send('\x1bc');
+    for (const ws of terminals.get(id) || []) if (ws.readyState === WebSocket.OPEN) {
+      if (ws.canvasMobile) ws.close(4001, 'Process replaced');
+      else ws.send('\x1bc');
+    }
     child.onData((data) => output(agent, data));
     child.onExit(({ exitCode, signal }) => {
       if (processes.get(id) !== child) return;
@@ -117,6 +120,7 @@ export function createAgentRuntime({ agents, spawnAgent, terminals, root, getBas
         catch (error) { agent.restoreWarning = error.message; }
       }
       output(agent, `\r\n[Pi exited: ${signal ? `signal ${signal}` : `code ${exitCode}`}]\r\n`);
+      for (const ws of terminals.get(id) || []) if (ws.canvasMobile) ws.close(4001, 'Process ended');
       broadcast();
     });
     broadcast();
