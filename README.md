@@ -19,6 +19,8 @@ Right-click an **agent name** in its header and choose **Copy agent name** to co
 
 Use **Board** in either workspace to see running Agent Canvas agents' names, status and latest progress, newest progress/status update first. Progress stays on one line (hover for the full text); click a row to locate/focus its Agent without maximizing. Outside click or Escape closes the panel. The entry is hidden during maximization. Agent windows no longer show inline progress, including the Card box Agent, which is excluded from Board. Idle retains progress; restarting a process clears it. See [Board behavior and SHM data flow](docs/scoreboard.md).
 
+Below 768px, the UI automatically becomes **Mobile Board / Cards**: monitor one Agent's real terminal, explicitly enable occasional input, or browse cards read-only. Mobile terminals never resize the shared PTY; View/search choices stay local and do not alter desktop layouts. There is no manual desktop-mode switch. See [Mobile UI](docs/mobile-ui.md) for behavior, limits and device validation.
+
 Use **＋ Note** to add a yellow sticky note. Notes display only their body text, with no title. Drag only the paper's top edge to move it, resize the note when selected, and edit its text directly (saved when the editor loses focus). Text scales with the canvas while staying at least 14 screen pixels for readability. Hover over the note to reveal **×** in the top-right corner and delete it (also available with keyboard focus or on touch devices). Notes are independent of agents and are saved with the Canvas.
 
 ## Private Tailscale access (optional)

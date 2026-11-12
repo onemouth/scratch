@@ -117,7 +117,7 @@ export async function testAgentInbox({ app, api, ev, send, wait, delay, boxAgent
     for (let i = 0; i < 5; i++) freshReceiver.send({ agentId: source.id, text: `Additional pending message ${i}` });
     await wait(`document.querySelectorAll('.agent-inbox-message').length===6`);
     if (process.env.CANVAS_INBOX_SCREENSHOT) await writeFile(process.env.CANVAS_INBOX_SCREENSHOT, Buffer.from((await send('Page.captureScreenshot', { format: 'png' })).data, 'base64'));
-    await send('Emulation.setDeviceMetricsOverride', { width: 520, height: 480, deviceScaleFactor: 1, mobile: false });
+    await send('Emulation.setDeviceMetricsOverride', { width: 800, height: 480, deviceScaleFactor: 1, mobile: false });
     await wait(`(()=>{const r=document.querySelector('.agent-inbox-popover')?.getBoundingClientRect();return r&&r.left>=0&&r.top>=0&&r.right<=innerWidth&&r.bottom<=innerHeight})()`);
     await send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
     await ev(`document.querySelector('[aria-label="Close pending inbox"]').click()`);

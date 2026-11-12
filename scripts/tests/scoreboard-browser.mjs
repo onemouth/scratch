@@ -86,7 +86,7 @@ export async function testScoreboard({ app, api, ev, send, wait, delay, boxAgent
   await click(`document.querySelector(${JSON.stringify(node + ' [aria-label="Return card ' + placement.cardId + ' to whiteboard"]')})`);
   await wait(`!!document.querySelector('.scoreboard > button')`);
   await open();
-  await send('Emulation.setDeviceMetricsOverride', { width: 520, height: 480, deviceScaleFactor: 1, mobile: false });
+  await send('Emulation.setDeviceMetricsOverride', { width: 800, height: 480, deviceScaleFactor: 1, mobile: false });
   await wait(`(()=>{const r=document.querySelector('.scoreboard-panel').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight&&Math.abs(r.left+r.width/2-innerWidth/2)<1&&Math.abs(r.top-48)<1})()`);
   await send('Emulation.setDeviceMetricsOverride', { width: 1400, height: 1000, deviceScaleFactor: 1, mobile: false });
   await click(`document.querySelector('[aria-label="Close Board"]')`);

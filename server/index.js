@@ -123,7 +123,7 @@ export function createApp({ port = Number(process.env.PORT || 3001), spawnAgent 
     isUnavailable: () => closing || resetting,
   });
   const server = http.createServer((req, res) => { handler(req, res).catch((error) => reply(res, 500, { error: error.message })); });
-  const wss = attachTerminalTransport({ server, agents, processes: runtime.processes, terminals, allowedOrigin });
+  const wss = attachTerminalTransport({ server, agents, processes: runtime.processes, terminals, allowedOrigin, getGeneration: id => runtime.get(id).processGeneration });
   return {
     server, snapshot, runtime,
     get vaultControlCode() { return vault?.controlCode; },

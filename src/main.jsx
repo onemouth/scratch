@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { createRoot } from 'react-dom/client';
 import { ReactFlow, Background, Controls, ControlButton, Handle, NodeResizer, Position, BaseEdge, EdgeLabelRenderer, getBezierPath, applyNodeChanges, useReactFlow, useViewport, ReactFlowProvider, useNodesInitialized } from '@xyflow/react';
 import '@xyflow/react/dist/style.css';
@@ -17,6 +17,8 @@ import { CardNode, reconcileCardDrafts } from './cards.jsx';
 import { AgentName } from './agent-name.jsx';
 import { AgentInbox } from './agent-inbox.jsx';
 import { Scoreboard } from './scoreboard.jsx';
+import { MobileApp } from './mobile.jsx';
+import { MOBILE_QUERY } from './mobile-state.js';
 import { beginLayoutInteraction, completeLayoutInteraction, humanLayoutHeaders } from './layout-interaction.js';
 import { CardLibrary, ViewControls } from './card-views.jsx';
 import { mergeViewResponse, mergeViewSnapshot, nodeMeasurement as measuredLike } from './card-view-state.js';
@@ -591,4 +593,10 @@ function Canvas() {
   </div>;
 }
 
-createRoot(document.getElementById('root')).render(<VaultProvider><ReactFlowProvider><Canvas /></ReactFlowProvider></VaultProvider>);
+const mobileMedia = window.matchMedia(MOBILE_QUERY);
+const subscribeMobile = callback => { mobileMedia.addEventListener('change', callback); return () => mobileMedia.removeEventListener('change', callback); };
+function App() {
+  const mobile = useSyncExternalStore(subscribeMobile, () => mobileMedia.matches);
+  return mobile ? <MobileApp /> : <VaultProvider><ReactFlowProvider><Canvas /></ReactFlowProvider></VaultProvider>;
+}
+createRoot(document.getElementById('root')).render(<App />);
