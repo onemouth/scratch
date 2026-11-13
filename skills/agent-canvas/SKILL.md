@@ -1,6 +1,6 @@
 ---
 name: agent-canvas
-description: Inspect Agent Canvas, delegate to Pi agents, send peer messages, report progress, manage cards/views and Interactive Cards, adjust Canvas layout, or retrieve approved Vault keys. Use for Canvas tasks in a Canvas-launched Pi process.
+description: Inspect Agent Canvas, delegate to Pi agents, send peer messages, report progress, manage cards/views and Interactive Cards, adjust Canvas layout, or retrieve approved Vault keys. Use for Canvas tasks and at the start of substantive work in a Canvas-launched Pi process to report own progress.
 compatibility: Canvas-launched Pi on macOS/Linux with supplied SHM tools and AGENT_CANVAS_URL/AGENT_CANVAS_ID. HTTP examples use curl; safe JSON construction uses jq.
 ---
 
@@ -32,6 +32,10 @@ curl -fsS "$AGENT_CANVAS_URL/api/docs"
 ```
 
 Do not guess unsupported routes or restart services to resolve a mismatch.
+
+## Proactive progress
+
+For substantive work, use `canvas_set_progress` at the start, meaningful phase changes, blockers, and completion. Report your current action or verified outcome briefly. Skip trivial Q&A; do not update per tool call, repeat unchanged text, or send timed heartbeats. Read the progress reference for transport details, not unrelated references. Never include secrets or treat progress as proof of success.
 
 ## Shared rules
 

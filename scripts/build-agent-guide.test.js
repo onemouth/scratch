@@ -112,6 +112,15 @@ test('Guide heading nesting leaves fenced command and source examples unchanged'
   assert.equal(nestHeadings(source), '## Title\n### Section\n```sh\n# shell comment\n```\n#### After\n~~~~text\n# literal heading\n~~~\n# still fenced\n~~~~\n### End');
 });
 
+test('Progress is discoverable for substantive Canvas work without noisy heartbeat updates', () => {
+  assert.match(skill, /at the start of substantive work in a Canvas-launched Pi process/);
+  assert.match(skill, /canvas_set_progress.*at the start, meaningful phase changes, blockers, and completion/);
+  assert.match(skill, /Skip trivial Q&A/);
+  assert.match(skill, /repeat unchanged text, or send timed heartbeats/);
+  assert.match(ref('progress'), /only claim what actually happened/);
+  assert.match(ref('progress'), /unnecessary Board reordering/);
+});
+
 test('Task references preserve transport, geometry, content and secret safety contracts', () => {
   assert.match(skill, /Card Box positions\/sizes\/viewports are human-only/);
   assert.match(skill, /Never automatically retry\/resend uncertain operations/);
